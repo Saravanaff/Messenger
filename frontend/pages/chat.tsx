@@ -42,8 +42,9 @@ export default function ChatPage() {
         if (!socket) return;
 
         socket.on('new_message', (message: Message) => {
+            console.log('Received new message via socket:', message);
             if (selectedConversation && message.conversationId === selectedConversation.id) {
-                setMessages((prev) => [message, ...prev]);
+                setMessages((prev) => [...prev, message]);
             }
             // Reload conversations to update last message
             loadConversations();
@@ -95,13 +96,31 @@ export default function ChatPage() {
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!messageInput.trim() || !selectedConversation) return;
+        if (!messageInput.trim() || !selectedConversation || !user) return;
+
+        const tempMessage = {
+            id: Date.now(), // Temporary ID
+            conversationId: selectedConversation.id,
+            senderId: user.id,
+            content: messageInput.trim(),
+            createdAt: new Date().toISOString(),
+            sender: {
+                id: user.id,
+                username: user.username,
+                email: user.email,
+            },
+        };
+
+        // Immediately add message to UI
+        setMessages((prev) => [...prev, tempMessage as Message]);
+        setMessageInput('');
 
         try {
-            await messageAPI.send(selectedConversation.id, messageInput);
-            setMessageInput('');
+            await messageAPI.send(selectedConversation.id, tempMessage.content);
         } catch (error) {
             console.error('Error sending message:', error);
+            // Remove the temporary message on error
+            setMessages((prev) => prev.filter((msg) => msg.id !== tempMessage.id));
         }
     };
 
