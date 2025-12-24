@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import bcrypt from 'bcrypt';
 import { User } from '../models/User';
 import { generateToken } from '../utils/jwt';
 import { AuthRequest } from '../middleware/auth';
@@ -37,11 +38,15 @@ export const register = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
+        // Hash password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
         // Create user
         const user = await User.create({
             username,
             email,
-            password, // Will be hashed by the model hook
+            password: hashedPassword,
         });
 
         // Generate token
@@ -81,7 +86,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         }
 
         // Check password
-        const isPasswordValid = await user.comparePassword(password);
+        const isPasswordValid = await bcrypt.compare(password, user.password);
 
         if (!isPasswordValid) {
             res.status(401).json({ error: 'Invalid credentials' });

@@ -6,6 +6,10 @@ import type {
     Conversation,
     ConversationListResponse,
     MessageHistoryResponse,
+    Group,
+    GroupListResponse,
+    GroupResponse,
+    Message,
 } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
@@ -61,8 +65,9 @@ export const authAPI = {
         return data;
     },
 
-    me: async (): Promise<{ user: User }> => {
-        const { data } = await api.get<{ user: User }>('/auth/me');
+    me: async (token?: string): Promise<{ user: User }> => {
+        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+        const { data } = await api.get<{ user: User }>('/auth/me', { headers });
         return data;
     },
 };
@@ -117,4 +122,55 @@ export const messageAPI = {
     },
 };
 
+// Group API
+export const groupAPI = {
+    create: async (name: string, memberIds: number[]): Promise<{ group: Group }> => {
+        const { data } = await api.post<{ group: Group }>('/groups', { name, memberIds });
+        return data;
+    },
+
+    getAll: async (): Promise<GroupListResponse> => {
+        const { data } = await api.get<GroupListResponse>('/groups');
+        return data;
+    },
+
+    getById: async (groupId: number): Promise<GroupResponse> => {
+        const { data } = await api.get<GroupResponse>(`/groups/${groupId}`);
+        return data;
+    },
+
+    addMember: async (groupId: number, userId: number): Promise<void> => {
+        await api.post(`/groups/${groupId}/members`, { userId });
+    },
+
+    removeMember: async (groupId: number, userId: number): Promise<void> => {
+        await api.delete(`/groups/${groupId}/members/${userId}`);
+    },
+
+    promote: async (groupId: number, userId: number): Promise<void> => {
+        await api.put(`/groups/${groupId}/members/${userId}/promote`);
+    },
+
+    demote: async (groupId: number, userId: number): Promise<void> => {
+        await api.put(`/groups/${groupId}/members/${userId}/demote`);
+    },
+
+    leave: async (groupId: number): Promise<void> => {
+        await api.post(`/groups/${groupId}/leave`);
+    },
+
+    sendMessage: async (groupId: number, content: string): Promise<{ message: Message }> => {
+        const { data } = await api.post<{ message: Message }>(`/groups/${groupId}/messages`, { content });
+        return data;
+    },
+
+    getMessages: async (groupId: number, limit = 50, offset = 0): Promise<MessageHistoryResponse> => {
+        const { data } = await api.get<MessageHistoryResponse>(`/groups/${groupId}/messages`, {
+            params: { limit, offset },
+        });
+        return data;
+    },
+};
+
 export default api;
+

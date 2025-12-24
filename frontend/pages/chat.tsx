@@ -2,25 +2,50 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/context/AuthContext';
 import { useSocket } from '@/context/SocketContext';
-import { conversationAPI, messageAPI, userAPI } from '@/lib/api';
+import { conversationAPI, messageAPI, userAPI, groupAPI } from '@/lib/api';
 import { getAvatarColor, getInitials } from '@/lib/avatarUtils';
-import type { Conversation, Message, User } from '@/types';
+import type { Conversation, Message, User, Group } from '@/types';
 import styles from '../styles/Chat.module.css';
+import groupStyles from '../styles/GroupChat.module.css';
+import CreateGroupModal from '@/components/groups/CreateGroupModal';
+import GroupInfoPanel from '@/components/groups/GroupInfoPanel';
+
+type ChatType = 'conversation' | 'group';
 
 export default function ChatPage() {
     const router = useRouter();
     const { user, loading, logout } = useAuth();
     const { socket } = useSocket();
+
+    // Conversations state
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+
+    // Groups state
+    const [groups, setGroups] = useState<Group[]>([]);
+    const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+    const [showGroupInfo, setShowGroupInfo] = useState(false);
+    const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+
+    // Current chat type
+    const [chatType, setChatType] = useState<ChatType>('conversation');
+
+    // Messages state
     const [messages, setMessages] = useState<Message[]>([]);
     const [messageInput, setMessageInput] = useState('');
+
+    // Loading states
     const [loadingConversations, setLoadingConversations] = useState(true);
+    const [loadingGroups, setLoadingGroups] = useState(true);
     const [loadingMessages, setLoadingMessages] = useState(false);
+
+    // Search state
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<User[]>([]);
     const [searchLoading, setSearchLoading] = useState(false);
     const [showSearch, setShowSearch] = useState(false);
+
+    // Sidebar state
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
     // Redirect if not authenticated
@@ -30,36 +55,71 @@ export default function ChatPage() {
         }
     }, [user, loading, router]);
 
-    // Load conversations
+    // Load conversations and groups
     useEffect(() => {
         if (user) {
             loadConversations();
+            loadGroups();
         }
     }, [user]);
 
     // Socket.io event listeners
     useEffect(() => {
-        if (!socket) return;
+        if (!socket || !user) return;
 
+        // Conversation messages
         socket.on('new_message', (message: Message) => {
             console.log('Received new message via socket:', message);
-            if (selectedConversation && message.conversationId === selectedConversation.id) {
-                setMessages((prev) => [...prev, message]);
+            // Only add message if it's from someone else (we add our own optimistically)
+            if (message.senderId !== user.id) {
+                if (chatType === 'conversation' && selectedConversation && message.conversationId === selectedConversation.id) {
+                    setMessages((prev) => [...prev, message]);
+                }
             }
-            // Reload conversations to update last message
             loadConversations();
         });
 
+        // Group messages
+        socket.on('new_group_message', (message: Message) => {
+            console.log('Received new group message via socket:', message);
+            // Only add message if it's from someone else (we add our own optimistically)
+            if (message.senderId !== user.id) {
+                if (chatType === 'group' && selectedGroup && message.groupId === selectedGroup.id) {
+                    setMessages((prev) => [...prev, message]);
+                }
+            }
+            loadGroups();
+        });
+
+        // Group member events
+        socket.on('member_added', () => {
+            if (selectedGroup) {
+                loadGroupMessages(selectedGroup.id);
+            }
+            loadGroups();
+        });
+
+        socket.on('member_removed', ({ userId }: { userId: number }) => {
+            if (user && userId === user.id && selectedGroup) {
+                // Current user was removed
+                setSelectedGroup(null);
+                setChatType('conversation');
+            }
+            loadGroups();
+        });
+
         socket.on('user_typing', ({ userId, conversationId }) => {
-            // Handle typing indicator
             console.log(`User ${userId} is typing in conversation ${conversationId}`);
         });
 
         return () => {
             socket.off('new_message');
+            socket.off('new_group_message');
+            socket.off('member_added');
+            socket.off('member_removed');
             socket.off('user_typing');
         };
-    }, [socket, selectedConversation]);
+    }, [socket, selectedConversation, selectedGroup, chatType, user]);
 
     const loadConversations = async () => {
         try {
@@ -72,13 +132,23 @@ export default function ChatPage() {
         }
     };
 
+    const loadGroups = async () => {
+        try {
+            const data = await groupAPI.getAll();
+            setGroups(data.groups);
+        } catch (error) {
+            console.error('Error loading groups:', error);
+        } finally {
+            setLoadingGroups(false);
+        }
+    };
+
     const loadMessages = async (conversationId: number) => {
         setLoadingMessages(true);
         try {
             const data = await messageAPI.getHistory(conversationId);
             setMessages(data.messages.reverse());
 
-            // Join conversation room
             if (socket) {
                 socket.emit('join_conversation', conversationId);
             }
@@ -89,37 +159,92 @@ export default function ChatPage() {
         }
     };
 
+    const loadGroupMessages = async (groupId: number) => {
+        setLoadingMessages(true);
+        try {
+            const data = await groupAPI.getMessages(groupId);
+            setMessages(data.messages.reverse());
+
+            if (socket) {
+                socket.emit('join_group', groupId);
+            }
+        } catch (error) {
+            console.error('Error loading group messages:', error);
+        } finally {
+            setLoadingMessages(false);
+        }
+    };
+
     const handleSelectConversation = (conversation: Conversation) => {
+        // Leave previous rooms
+        if (socket) {
+            if (selectedConversation) {
+                socket.emit('leave_conversation', selectedConversation.id);
+            }
+            if (selectedGroup) {
+                socket.emit('leave_group', selectedGroup.id);
+            }
+        }
+
         setSelectedConversation(conversation);
+        setSelectedGroup(null);
+        setChatType('conversation');
+        setShowGroupInfo(false);
         loadMessages(conversation.id);
+    };
+
+    const handleSelectGroup = (group: Group) => {
+        // Leave previous rooms
+        if (socket) {
+            if (selectedConversation) {
+                socket.emit('leave_conversation', selectedConversation.id);
+            }
+            if (selectedGroup) {
+                socket.emit('leave_group', selectedGroup.id);
+            }
+        }
+
+        setSelectedGroup(group);
+        setSelectedConversation(null);
+        setChatType('group');
+        loadGroupMessages(group.id);
     };
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!messageInput.trim() || !selectedConversation || !user) return;
+        if (!messageInput.trim() || !user) return;
 
-        const tempMessage = {
-            id: Date.now(), // Temporary ID
-            conversationId: selectedConversation.id,
+        const tempMessage: Message = {
+            id: Date.now(),
+            conversationId: chatType === 'conversation' ? selectedConversation?.id || null : null,
+            groupId: chatType === 'group' ? selectedGroup?.id || null : null,
             senderId: user.id,
             content: messageInput.trim(),
+            status: 'sent',
             createdAt: new Date().toISOString(),
             sender: {
                 id: user.id,
                 username: user.username,
                 email: user.email,
+                createdAt: '',
             },
         };
 
-        // Immediately add message to UI
-        setMessages((prev) => [...prev, tempMessage as Message]);
+        setMessages((prev) => [...prev, tempMessage]);
         setMessageInput('');
 
         try {
-            await messageAPI.send(selectedConversation.id, tempMessage.content);
+            if (chatType === 'conversation' && selectedConversation) {
+                await messageAPI.send(selectedConversation.id, tempMessage.content);
+                // Reload conversations to update sidebar with new message
+                loadConversations();
+            } else if (chatType === 'group' && selectedGroup) {
+                await groupAPI.sendMessage(selectedGroup.id, tempMessage.content);
+                // Reload groups to update sidebar with new message
+                loadGroups();
+            }
         } catch (error) {
             console.error('Error sending message:', error);
-            // Remove the temporary message on error
             setMessages((prev) => prev.filter((msg) => msg.id !== tempMessage.id));
         }
     };
@@ -141,7 +266,7 @@ export default function ChatPage() {
             } finally {
                 setSearchLoading(false);
             }
-        }, 300); // Debounce 300ms
+        }, 300);
 
         return () => clearTimeout(timer);
     }, [searchQuery]);
@@ -153,10 +278,22 @@ export default function ChatPage() {
             setSearchQuery('');
             setSearchResults([]);
             handleSelectConversation(data.conversation);
-            loadConversations(); // Refresh conversation list
+            loadConversations();
         } catch (error) {
             console.error('Error creating conversation:', error);
         }
+    };
+
+    const handleGroupCreated = (group: Group) => {
+        setGroups((prev) => [group, ...prev]);
+        handleSelectGroup(group);
+    };
+
+    const handleLeaveGroup = () => {
+        setSelectedGroup(null);
+        setChatType('conversation');
+        setShowGroupInfo(false);
+        loadGroups();
     };
 
     if (loading || !user) {
@@ -180,7 +317,6 @@ export default function ChatPage() {
                     )}
                 </div>
 
-                {/* Toggle button on right edge */}
                 <button
                     onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
                     className={styles.toggleButton}
@@ -197,12 +333,9 @@ export default function ChatPage() {
 
                 {sidebarCollapsed ? (
                     <>
-                        {/* User icon in collapsed mode */}
                         <div className={styles.collapsedUserIcon} style={{ backgroundColor: getAvatarColor(user.username) }}>
                             {getInitials(user.username)}
                         </div>
-
-                        {/* New chat button in collapsed mode */}
                         <button
                             className={styles.collapsedNewChatButton}
                             onClick={() => {
@@ -231,6 +364,19 @@ export default function ChatPage() {
                             onClick={() => setShowSearch(!showSearch)}
                         >
                             New Chat
+                        </button>
+
+                        <button
+                            className={groupStyles.createGroupButton}
+                            onClick={() => setShowCreateGroupModal(true)}
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="9" cy="7" r="4"></circle>
+                                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                            </svg>
+                            Create Group
                         </button>
 
                         {showSearch && (
@@ -278,9 +424,40 @@ export default function ChatPage() {
                 )}
 
                 <div className={styles.conversationList}>
+                    {/* Groups Section */}
+                    {!sidebarCollapsed && groups.length > 0 && (
+                        <>
+                            <div className={groupStyles.sectionLabel}>Groups</div>
+                            {groups.map((group) => (
+                                <div
+                                    key={`group-${group.id}`}
+                                    className={`${groupStyles.groupItem} ${selectedGroup?.id === group.id ? groupStyles.active : ''}`}
+                                    onClick={() => handleSelectGroup(group)}
+                                >
+                                    <div className={groupStyles.groupAvatar}>
+                                        {getInitials(group.name)}
+                                    </div>
+                                    <div className={groupStyles.groupItemInfo}>
+                                        <div className={groupStyles.groupItemName}>{group.name}</div>
+                                        {group.lastMessage && (
+                                            <div className={groupStyles.groupLastMessage}>
+                                                {group.lastMessage.sender?.username}: {group.lastMessage.content}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </>
+                    )}
+
+                    {/* Conversations Section */}
+                    {!sidebarCollapsed && (conversations.length > 0 || groups.length > 0) && (
+                        <div className={groupStyles.sectionLabel}>Direct Messages</div>
+                    )}
+
                     {loadingConversations ? (
                         !sidebarCollapsed && <div className={styles.loadingText}>Loading conversations...</div>
-                    ) : conversations.length === 0 ? (
+                    ) : conversations.length === 0 && groups.length === 0 ? (
                         !sidebarCollapsed && <div className={styles.emptyState}>
                             No conversations yet. Start a new chat!
                         </div>
@@ -319,7 +496,7 @@ export default function ChatPage() {
 
             {/* Main Chat Area */}
             <div className={styles.mainArea}>
-                {selectedConversation ? (
+                {chatType === 'conversation' && selectedConversation ? (
                     <>
                         <div className={styles.chatHeader}>
                             <div className={styles.chatHeaderInfo}>
@@ -348,9 +525,76 @@ export default function ChatPage() {
                                 messages.map((message) => (
                                     <div
                                         key={message.id}
-                                        className={`${styles.message} ${message.senderId === user.id ? styles.sent : styles.received
-                                            }`}
+                                        className={`${styles.message} ${message.senderId === user.id ? styles.sent : styles.received}`}
                                     >
+                                        <div className={styles.messageContent}>{message.content}</div>
+                                        <div className={styles.messageTime}>
+                                            {new Date(message.createdAt).toLocaleTimeString([], {
+                                                hour: '2-digit',
+                                                minute: '2-digit',
+                                            })}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        <form onSubmit={handleSendMessage} className={styles.messageInputContainer}>
+                            <input
+                                type="text"
+                                value={messageInput}
+                                onChange={(e) => setMessageInput(e.target.value)}
+                                placeholder="Type a message..."
+                                className={styles.messageInput}
+                            />
+                            <button type="submit" className={styles.sendButton} disabled={!messageInput.trim()}>
+                                Send
+                            </button>
+                        </form>
+                    </>
+                ) : chatType === 'group' && selectedGroup ? (
+                    <>
+                        <div className={groupStyles.groupHeader}>
+                            <div className={groupStyles.groupHeaderAvatar}>
+                                {getInitials(selectedGroup.name)}
+                            </div>
+                            <div className={groupStyles.groupHeaderInfo}>
+                                <div className={groupStyles.groupHeaderName}>{selectedGroup.name}</div>
+                                <div className={groupStyles.groupHeaderMemberCount}>
+                                    {selectedGroup.memberCount || selectedGroup.members?.length || 0} members
+                                </div>
+                            </div>
+                            <button
+                                className={groupStyles.infoButton}
+                                onClick={() => setShowGroupInfo(!showGroupInfo)}
+                                title="Group Info"
+                            >
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className={styles.messagesContainer}>
+                            {loadingMessages ? (
+                                <div className={styles.loadingText}>Loading messages...</div>
+                            ) : messages.length === 0 ? (
+                                <div className={styles.emptyState}>
+                                    No messages yet. Start the conversation!
+                                </div>
+                            ) : (
+                                messages.map((message) => (
+                                    <div
+                                        key={message.id}
+                                        className={`${styles.message} ${message.senderId === user.id ? styles.sent : styles.received}`}
+                                    >
+                                        {message.senderId !== user.id && (
+                                            <div className={groupStyles.messageSenderName}>
+                                                {message.sender?.username}
+                                            </div>
+                                        )}
                                         <div className={styles.messageContent}>{message.content}</div>
                                         <div className={styles.messageTime}>
                                             {new Date(message.createdAt).toLocaleTimeString([], {
@@ -378,12 +622,37 @@ export default function ChatPage() {
                     </>
                 ) : (
                     <div className={styles.emptyChat}>
-                        <div className={styles.emptyChatIcon}>💬</div>
+                        <div className={styles.emptyChatIcon}>
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                        </div>
                         <h2>Select a conversation</h2>
                         <p>Choose a conversation from the sidebar or start a new chat</p>
                     </div>
                 )}
             </div>
+
+            {/* Group Info Panel */}
+            {showGroupInfo && selectedGroup && (
+                <GroupInfoPanel
+                    group={selectedGroup}
+                    currentUserId={user.id}
+                    onClose={() => setShowGroupInfo(false)}
+                    onMemberAdded={loadGroups}
+                    onMemberRemoved={loadGroups}
+                    onLeaveGroup={handleLeaveGroup}
+                />
+            )}
+
+            {/* Create Group Modal */}
+            <CreateGroupModal
+                isOpen={showCreateGroupModal}
+                onClose={() => setShowCreateGroupModal(false)}
+                onGroupCreated={handleGroupCreated}
+                currentUserId={user.id}
+            />
         </div>
     );
 }
+

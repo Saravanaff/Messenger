@@ -15,24 +15,75 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Helper function to check if JWT token is expired
+const isTokenExpired = (token: string): boolean => {
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const expirationTime = payload.exp * 1000; // Convert to milliseconds
+        return Date.now() >= expirationTime;
+    } catch {
+        return true; // If we can't decode, treat as expired
+    }
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [user, setUser] = useState<User | null>(null);
     const [token, setToken] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const router = useRouter();
 
-    // Load user from localStorage on mount
-    useEffect(() => {
-        const storedToken = localStorage.getItem('token');
-        const storedUser = localStorage.getItem('user');
+    // Validate token with backend
+    const validateToken = async (storedToken: string): Promise<boolean> => {
+        try {
+            // First check if token is expired locally
+            if (isTokenExpired(storedToken)) {
+                console.log('Token expired locally');
+                return false;
+            }
 
-        if (storedToken && storedUser) {
-            setToken(storedToken);
-            setUser(JSON.parse(storedUser));
-            initializeSocket(storedToken);
+            // Then validate with backend
+            const response = await authAPI.me(storedToken);
+            return !!response?.user;
+        } catch (error) {
+            console.log('Token validation failed:', error);
+            return false;
         }
+    };
 
-        setLoading(false);
+    // Clear auth data and redirect to login
+    const clearAuthData = () => {
+        setUser(null);
+        setToken(null);
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        disconnectSocket();
+    };
+
+    // Load and validate user from localStorage on mount
+    useEffect(() => {
+        const initializeAuth = async () => {
+            const storedToken = localStorage.getItem('token');
+            const storedUser = localStorage.getItem('user');
+
+            if (storedToken && storedUser) {
+                // Validate the token before using it
+                const isValid = await validateToken(storedToken);
+
+                if (isValid) {
+                    setToken(storedToken);
+                    setUser(JSON.parse(storedUser));
+                    initializeSocket(storedToken);
+                } else {
+                    // Token is invalid or expired, clear auth data
+                    console.log('Session expired. Please login again.');
+                    clearAuthData();
+                }
+            }
+
+            setLoading(false);
+        };
+
+        initializeAuth();
     }, []);
 
     const login = async (email: string, password: string) => {

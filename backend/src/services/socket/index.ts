@@ -13,7 +13,6 @@ export const initializeSocket = (server: HTTPServer): Server => {
         },
     });
 
-    // Authentication middleware
     io.use((socket: Socket, next) => {
         try {
             const token = socket.handshake.auth.token;
@@ -52,7 +51,19 @@ export const initializeSocket = (server: HTTPServer): Server => {
             console.log(`User ${userId} left conversation ${conversationId}`);
         });
 
-        // Typing indicators
+        // Join group rooms
+        socket.on('join_group', (groupId: number) => {
+            socket.join(`group:${groupId}`);
+            console.log(`User ${userId} joined group ${groupId}`);
+        });
+
+        // Leave group rooms
+        socket.on('leave_group', (groupId: number) => {
+            socket.leave(`group:${groupId}`);
+            console.log(`User ${userId} left group ${groupId}`);
+        });
+
+        // Typing indicators for conversations
         socket.on('typing_start', async (data: { conversationId: number }) => {
             await CacheService.setTyping(data.conversationId, userId);
             socket.to(`conversation:${data.conversationId}`).emit('user_typing', {
@@ -65,6 +76,21 @@ export const initializeSocket = (server: HTTPServer): Server => {
             socket.to(`conversation:${data.conversationId}`).emit('user_stopped_typing', {
                 userId,
                 conversationId: data.conversationId,
+            });
+        });
+
+        // Typing indicators for groups
+        socket.on('group_typing_start', (data: { groupId: number }) => {
+            socket.to(`group:${data.groupId}`).emit('group_user_typing', {
+                userId,
+                groupId: data.groupId,
+            });
+        });
+
+        socket.on('group_typing_stop', (data: { groupId: number }) => {
+            socket.to(`group:${data.groupId}`).emit('group_user_stopped_typing', {
+                userId,
+                groupId: data.groupId,
             });
         });
 
@@ -94,3 +120,4 @@ export const getIO = (): Server => {
     }
     return io;
 };
+

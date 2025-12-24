@@ -8,7 +8,8 @@ export interface User {
 
 export interface Message {
     id: number;
-    conversationId: number;
+    conversationId?: number | null;
+    groupId?: number | null;
     senderId: number;
     content: string;
     status: 'sent' | 'delivered' | 'read';
@@ -28,6 +29,23 @@ export interface Conversation {
     otherParticipant?: User;
 }
 
+export interface GroupMember extends User {
+    role: 'admin' | 'member';
+    joinedAt: string;
+}
+
+export interface Group {
+    id: number;
+    name: string;
+    createdBy: number;
+    createdAt: string;
+    creator?: User;
+    members?: GroupMember[];
+    memberCount?: number;
+    lastMessage?: Message | null;
+    myRole?: 'admin' | 'member';
+}
+
 export interface AuthResponse {
     message: string;
     token: string;
@@ -41,10 +59,21 @@ export interface ConversationListResponse {
 
 export interface MessageHistoryResponse {
     messages: Message[];
-    conversationId: number;
+    conversationId?: number;
+    groupId?: number;
 }
 
 export interface UserSearchResponse {
     users: User[];
     source: 'cache' | 'database';
 }
+
+export interface GroupListResponse {
+    groups: Group[];
+}
+
+export interface GroupResponse {
+    group: Group;
+    myRole: 'admin' | 'member';
+}
+

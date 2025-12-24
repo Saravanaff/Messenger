@@ -9,6 +9,7 @@ import {
 } from 'sequelize-typescript';
 import { User } from './User';
 import { Conversation } from './Conversation';
+import { Group } from './Group';
 
 export enum MessageStatus {
     SENT = 'sent',
@@ -32,9 +33,17 @@ export class Message extends Model {
     @Index
     @Column({
         type: DataType.INTEGER,
-        allowNull: false,
+        allowNull: true, // Now optional - message can belong to conversation OR group
     })
-    conversationId!: number;
+    conversationId!: number | null;
+
+    @ForeignKey(() => Group)
+    @Index
+    @Column({
+        type: DataType.INTEGER,
+        allowNull: true, // Optional - set when message is for a group
+    })
+    groupId!: number | null;
 
     @ForeignKey(() => User)
     @Index
@@ -59,6 +68,10 @@ export class Message extends Model {
     @BelongsTo(() => Conversation)
     conversation!: Conversation;
 
+    @BelongsTo(() => Group)
+    group!: Group;
+
     @BelongsTo(() => User, 'senderId')
     sender!: User;
 }
+

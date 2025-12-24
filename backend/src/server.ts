@@ -42,7 +42,7 @@ const initializeServices = async () => {
         console.log('✅ Database connection established');
 
         // Sync database models
-        await sequelize.sync({ alter: false });
+        await sequelize.sync();
         console.log('✅ Database models synchronized');
 
         // Initialize Socket.io
