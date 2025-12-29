@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { groupAPI, userAPI } from '@/lib/api';
+import { groupAPI, roomAPI } from '@/lib/api';
 import { getAvatarColor, getInitials } from '@/lib/avatarUtils';
-import type { Group, GroupMember, User } from '@/types';
+import type { Group, GroupMember, User, Room } from '@/types';
 import styles from '../../styles/GroupChat.module.css';
 
 interface GroupInfoPanelProps {
@@ -11,6 +11,8 @@ interface GroupInfoPanelProps {
     onMemberAdded: () => void;
     onMemberRemoved: () => void;
     onLeaveGroup: () => void;
+    onSelectRoom?: (room: Room) => void;
+    onCreateRoom?: () => void;
 }
 
 export default function GroupInfoPanel({
@@ -20,9 +22,12 @@ export default function GroupInfoPanel({
     onMemberAdded,
     onMemberRemoved,
     onLeaveGroup,
+    onSelectRoom,
+    onCreateRoom,
 }: GroupInfoPanelProps) {
     const [members, setMembers] = useState<GroupMember[]>(group.members || []);
     const [myRole, setMyRole] = useState<'admin' | 'member'>(group.myRole || 'member');
+    const [rooms, setRooms] = useState<Room[]>([]);
     const [showAddMember, setShowAddMember] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<User[]>([]);
@@ -30,7 +35,7 @@ export default function GroupInfoPanel({
     const [activeMenu, setActiveMenu] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
 
-    // Refresh group data
+    // Refresh group data and rooms
     useEffect(() => {
         const fetchGroupDetails = async () => {
             try {
@@ -41,7 +46,18 @@ export default function GroupInfoPanel({
                 console.error('Error fetching group details:', err);
             }
         };
+
+        const fetchRooms = async () => {
+            try {
+                const data = await roomAPI.getAll(group.id);
+                setRooms(data.rooms);
+            } catch (err) {
+                console.error('Error fetching rooms:', err);
+            }
+        };
+
         fetchGroupDetails();
+        fetchRooms();
     }, [group.id]);
 
     // Search users for adding
@@ -54,9 +70,9 @@ export default function GroupInfoPanel({
         const timer = setTimeout(async () => {
             setSearchLoading(true);
             try {
-                const data = await userAPI.search(searchQuery);
+                const { users } = await import('@/lib/api').then(m => m.userAPI.search(searchQuery));
                 // Filter out existing members
-                const filtered = data.users.filter(
+                const filtered = users.filter(
                     (u) => !members.some((m) => m.id === u.id)
                 );
                 setSearchResults(filtered);
@@ -111,7 +127,6 @@ export default function GroupInfoPanel({
         try {
             await groupAPI.promote(group.id, userId);
             setActiveMenu(null);
-            // Refresh members
             const data = await groupAPI.getById(group.id);
             setMembers(data.group.members || []);
         } catch (err: any) {
@@ -126,7 +141,6 @@ export default function GroupInfoPanel({
         try {
             await groupAPI.demote(group.id, userId);
             setActiveMenu(null);
-            // Refresh members
             const data = await groupAPI.getById(group.id);
             setMembers(data.group.members || []);
         } catch (err: any) {
@@ -168,6 +182,52 @@ export default function GroupInfoPanel({
             <h2 className={styles.groupName}>{group.name}</h2>
             <p className={styles.groupMemberCount}>{members.length} members</p>
 
+            {/* Rooms Section */}
+            <div className={styles.membersSection}>
+                <div className={styles.sectionTitle}>
+                    <span>Rooms</span>
+                    {isAdmin && onCreateRoom && (
+                        <button
+                            className={styles.addMemberButton}
+                            onClick={onCreateRoom}
+                            title="Create room"
+                        >
+                            +
+                        </button>
+                    )}
+                </div>
+
+                {rooms.length === 0 ? (
+                    <div className={styles.emptyState}>No rooms yet</div>
+                ) : (
+                    rooms.map((room) => (
+                        <div
+                            key={room.id}
+                            className={styles.memberItem}
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => onSelectRoom?.(room)}
+                        >
+                            <div
+                                className={styles.memberAvatar}
+                                style={{ backgroundColor: '#00D9A3', borderRadius: '8px' }}
+                            >
+                                {getInitials(room.name)}
+                            </div>
+                            <div className={styles.memberInfo}>
+                                <div className={styles.memberName}>{room.name}</div>
+                                <div className={styles.memberEmail}>
+                                    {room.memberCount || room.members?.length || 0} members
+                                </div>
+                            </div>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M9 18l6-6-6-6" />
+                            </svg>
+                        </div>
+                    ))
+                )}
+            </div>
+
+            {/* Members Section */}
             <div className={styles.membersSection}>
                 <div className={styles.sectionTitle}>
                     <span>Members</span>

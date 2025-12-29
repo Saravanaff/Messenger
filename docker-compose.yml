@@ -37,6 +37,20 @@ services:
       timeout: 3s
       retries: 5
 
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: chat-livekit
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    network_mode: host  # Use host network for localhost WebRTC
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 volumes:
   mysql_data:
   redis_data:

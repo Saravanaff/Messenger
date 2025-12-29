@@ -10,6 +10,7 @@ import {
 import { User } from './User';
 import { Conversation } from './Conversation';
 import { Group } from './Group';
+import { Room } from './Room';
 
 export enum MessageStatus {
     SENT = 'sent',
@@ -33,7 +34,7 @@ export class Message extends Model {
     @Index
     @Column({
         type: DataType.INTEGER,
-        allowNull: true, // Now optional - message can belong to conversation OR group
+        allowNull: true, // Now optional - message can belong to conversation OR group OR room
     })
     conversationId!: number | null;
 
@@ -44,6 +45,14 @@ export class Message extends Model {
         allowNull: true, // Optional - set when message is for a group
     })
     groupId!: number | null;
+
+    @ForeignKey(() => Room)
+    @Index
+    @Column({
+        type: DataType.INTEGER,
+        allowNull: true, // Optional - set when message is for a room
+    })
+    roomId!: number | null;
 
     @ForeignKey(() => User)
     @Index
@@ -71,7 +80,9 @@ export class Message extends Model {
     @BelongsTo(() => Group)
     group!: Group;
 
+    @BelongsTo(() => Room)
+    room!: Room;
+
     @BelongsTo(() => User, 'senderId')
     sender!: User;
 }
-

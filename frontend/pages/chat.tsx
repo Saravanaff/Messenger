@@ -1,16 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/context/AuthContext';
 import { useSocket } from '@/context/SocketContext';
-import { conversationAPI, messageAPI, userAPI, groupAPI } from '@/lib/api';
+import { conversationAPI, messageAPI, userAPI, groupAPI, roomAPI, callAPI } from '@/lib/api';
 import { getAvatarColor, getInitials } from '@/lib/avatarUtils';
-import type { Conversation, Message, User, Group } from '@/types';
+import type { Conversation, Message, User, Group, Room, GroupMember } from '@/types';
+import type { IncomingCall, ActiveCall } from '@/types/call';
 import styles from '../styles/Chat.module.css';
 import groupStyles from '../styles/GroupChat.module.css';
+import callStyles from '../styles/CallModal.module.css';
 import CreateGroupModal from '@/components/groups/CreateGroupModal';
 import GroupInfoPanel from '@/components/groups/GroupInfoPanel';
+import CreateRoomModal from '@/components/rooms/CreateRoomModal';
+import RoomInfoPanel from '@/components/rooms/RoomInfoPanel';
+import CallModal from '@/components/call/CallModal';
+import IncomingCallModal from '@/components/call/IncomingCallModal';
+import TypingIndicator from '@/components/chat/TypingIndicator';
 
-type ChatType = 'conversation' | 'group';
+type ChatType = 'conversation' | 'group' | 'room';
 
 export default function ChatPage() {
     const router = useRouter();
@@ -26,6 +33,13 @@ export default function ChatPage() {
     const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
     const [showGroupInfo, setShowGroupInfo] = useState(false);
     const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+
+    // Rooms state
+    const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+    const [showRoomInfo, setShowRoomInfo] = useState(false);
+    const [showCreateRoomModal, setShowCreateRoomModal] = useState(false);
+    const [groupMembersForRoom, setGroupMembersForRoom] = useState<GroupMember[]>([]);
+    const [groupRooms, setGroupRooms] = useState<Room[]>([]);
 
     // Current chat type
     const [chatType, setChatType] = useState<ChatType>('conversation');
@@ -47,6 +61,15 @@ export default function ChatPage() {
 
     // Sidebar state
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    const [roomsExpanded, setRoomsExpanded] = useState(true);
+
+    // Call state
+    const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+    const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
+
+    // Typing indicator state
+    const [typingUsers, setTypingUsers] = useState<{ [key: string]: string }>({}); // key: userId, value: username
+    const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     // Redirect if not authenticated
     useEffect(() => {
@@ -69,12 +92,26 @@ export default function ChatPage() {
 
         // Conversation messages
         socket.on('new_message', (message: Message) => {
-            console.log('Received new message via socket:', message);
+            console.log('📨 Received new_message event via socket:', message);
+            console.log('🔍 Current state:', {
+                chatType,
+                selectedConversationId: selectedConversation?.id,
+                messageConversationId: message.conversationId,
+                currentUserId: user.id,
+                messageSenderId: message.senderId
+            });
+
             // Only add message if it's from someone else (we add our own optimistically)
             if (message.senderId !== user.id) {
+                console.log('✅ Message is from another user');
                 if (chatType === 'conversation' && selectedConversation && message.conversationId === selectedConversation.id) {
+                    console.log('✅ Adding message to state');
                     setMessages((prev) => [...prev, message]);
+                } else {
+                    console.log('⚠️ Message not added - conversation not selected or wrong conversation');
                 }
+            } else {
+                console.log('⚠️ Message is from current user - skipping (optimistic update already done)');
             }
             loadConversations();
         });
@@ -89,6 +126,16 @@ export default function ChatPage() {
                 }
             }
             loadGroups();
+        });
+
+        // Room messages
+        socket.on('new_room_message', (message: Message) => {
+            console.log('Received new room message via socket:', message);
+            if (message.senderId !== user.id) {
+                if (chatType === 'room' && selectedRoom && message.roomId === selectedRoom.id) {
+                    setMessages((prev) => [...prev, message]);
+                }
+            }
         });
 
         // Group member events
@@ -108,18 +155,115 @@ export default function ChatPage() {
             loadGroups();
         });
 
+        // Room events
+        socket.on('room_member_removed', ({ roomId, userId }: { roomId: number; userId: number }) => {
+            if (user && userId === user.id && selectedRoom && selectedRoom.id === roomId) {
+                setSelectedRoom(null);
+                setChatType('group');
+            }
+        });
+
+        socket.on('room_deleted', ({ roomId }: { roomId: number }) => {
+            if (selectedRoom && selectedRoom.id === roomId) {
+                setSelectedRoom(null);
+                setChatType('group');
+            }
+        });
+
         socket.on('user_typing', ({ userId, conversationId }) => {
             console.log(`User ${userId} is typing in conversation ${conversationId}`);
+            if (chatType === 'conversation' && selectedConversation && conversationId === selectedConversation.id) {
+                // Find the other participant's username
+                const otherUser = selectedConversation.otherParticipant;
+                if (otherUser && userId === otherUser.id) {
+                    setTypingUsers(prev => ({ ...prev, [userId]: otherUser.username }));
+
+                    // Auto-remove after 3 seconds
+                    setTimeout(() => {
+                        setTypingUsers(prev => {
+                            const newState = { ...prev };
+                            delete newState[userId];
+                            return newState;
+                        });
+                    }, 3000);
+                }
+            }
+        });
+
+        socket.on('user_stopped_typing', ({ userId }) => {
+            setTypingUsers(prev => {
+                const newState = { ...prev };
+                delete newState[userId];
+                return newState;
+            });
+        });
+
+        // Read receipt events
+        socket.on('message_read_receipt', ({ messageId, userId, readAt }) => {
+            console.log(`Message ${messageId} read by user ${userId}`);
+            setMessages(prev => prev.map(msg =>
+                msg.id === messageId ? { ...msg, status: 'read' } : msg
+            ));
+        });
+
+        socket.on('messages_read', ({ messageIds, userId }) => {
+            console.log(`Messages read by user ${userId}:`, messageIds);
+            setMessages(prev => prev.map(msg =>
+                messageIds.includes(msg.id) ? { ...msg, status: 'read' } : msg
+            ));
+        });
+
+        // Call events
+        socket.on('call:incoming', (data: IncomingCall) => {
+            console.log('Incoming call:', data);
+            setIncomingCall(data);
+        });
+
+        socket.on('call:rejected', ({ userId, username, roomName }) => {
+            console.log(`Call rejected by ${username}`);
+            // Could show a notification here
+        });
+
+        socket.on('call:ended', ({ roomName, endedBy }) => {
+            console.log(`Call ended by user ${endedBy}`);
+            if (activeCall && activeCall.roomName === roomName) {
+                setActiveCall(null);
+            }
+        });
+
+        socket.on('call:timeout', ({ roomName }) => {
+            console.log(`Call timed out: ${roomName}`);
+            if (activeCall && activeCall.roomName === roomName) {
+                setActiveCall(null);
+            }
+        });
+
+        socket.on('call:participant_disconnected', ({ roomName, userId, username }) => {
+            console.log(`${username} disconnected from call`);
+            if (activeCall && activeCall.roomName === roomName) {
+                // Could show notification or end call
+            }
         });
 
         return () => {
             socket.off('new_message');
             socket.off('new_group_message');
+            socket.off('new_room_message');
             socket.off('member_added');
             socket.off('member_removed');
+            socket.off('room_member_removed');
+            socket.off('room_deleted');
             socket.off('user_typing');
+            socket.off('user_stopped_typing');
+            socket.off('message_read_receipt');
+            socket.off('messages_read');
+            socket.off('call:incoming');
+            socket.off('call:rejected');
+            socket.off('call:ended');
+            socket.off('call:timeout');
+            socket.off('call:participant_disconnected');
         };
-    }, [socket, selectedConversation, selectedGroup, chatType, user]);
+    }, [socket, selectedConversation, selectedGroup, selectedRoom, chatType, user, activeCall]);
 
     const loadConversations = async () => {
         try {
@@ -150,7 +294,10 @@ export default function ChatPage() {
             setMessages(data.messages.reverse());
 
             if (socket) {
+                console.log(`🔌 Joining conversation room: conversation:${conversationId}`);
                 socket.emit('join_conversation', conversationId);
+            } else {
+                console.error('❌ Socket not available when trying to join conversation');
             }
         } catch (error) {
             console.error('Error loading messages:', error);
@@ -184,16 +331,21 @@ export default function ChatPage() {
             if (selectedGroup) {
                 socket.emit('leave_group', selectedGroup.id);
             }
+            if (selectedRoom) {
+                socket.emit('leave_room', selectedRoom.id);
+            }
         }
 
         setSelectedConversation(conversation);
         setSelectedGroup(null);
+        setSelectedRoom(null);
         setChatType('conversation');
         setShowGroupInfo(false);
+        setShowRoomInfo(false);
         loadMessages(conversation.id);
     };
 
-    const handleSelectGroup = (group: Group) => {
+    const handleSelectGroup = async (group: Group) => {
         // Leave previous rooms
         if (socket) {
             if (selectedConversation) {
@@ -202,22 +354,116 @@ export default function ChatPage() {
             if (selectedGroup) {
                 socket.emit('leave_group', selectedGroup.id);
             }
+            if (selectedRoom) {
+                socket.emit('leave_room', selectedRoom.id);
+            }
         }
 
         setSelectedGroup(group);
         setSelectedConversation(null);
+        setSelectedRoom(null);
         setChatType('group');
+        setShowRoomInfo(false);
         loadGroupMessages(group.id);
+
+        // Load rooms for this group
+        try {
+            const { rooms } = await roomAPI.getAll(group.id);
+            setGroupRooms(rooms);
+        } catch (error) {
+            console.error('Error loading rooms:', error);
+            setGroupRooms([]);
+        }
+    };
+
+    const handleSelectRoom = async (room: Room) => {
+        // Leave previous rooms
+        if (socket) {
+            if (selectedConversation) {
+                socket.emit('leave_conversation', selectedConversation.id);
+            }
+            if (selectedRoom) {
+                socket.emit('leave_room', selectedRoom.id);
+            }
+        }
+
+        // Fetch full room details
+        try {
+            const { room: fullRoom } = await roomAPI.getById(room.id);
+            setSelectedRoom(fullRoom);
+            setChatType('room');
+            setShowGroupInfo(false);
+
+            // Join room socket
+            if (socket) {
+                socket.emit('join_room', room.id);
+            }
+
+            // Load room messages
+            setLoadingMessages(true);
+            const data = await roomAPI.getMessages(room.id);
+            setMessages(data.messages.reverse());
+        } catch (error) {
+            console.error('Error selecting room:', error);
+        } finally {
+            setLoadingMessages(false);
+        }
+    };
+
+    const handleCreateRoom = async () => {
+        if (!selectedGroup) return;
+
+        // Get group members for room creation
+        try {
+            const { group } = await groupAPI.getById(selectedGroup.id);
+            setGroupMembersForRoom(group.members || []);
+            setShowCreateRoomModal(true);
+        } catch (error) {
+            console.error('Error fetching group members:', error);
+        }
+    };
+
+    const handleRoomCreated = (room: Room) => {
+        setShowCreateRoomModal(false);
+        handleSelectRoom(room);
+    };
+
+    const handleLeaveRoom = () => {
+        setSelectedRoom(null);
+        setChatType('group');
+        setShowRoomInfo(false);
+        // Reload group messages
+        if (selectedGroup) {
+            loadGroupMessages(selectedGroup.id);
+        }
+    };
+
+    const handleDeleteRoom = () => {
+        setSelectedRoom(null);
+        setChatType('group');
+        setShowRoomInfo(false);
+        // Reload group messages
+        if (selectedGroup) {
+            loadGroupMessages(selectedGroup.id);
+        }
     };
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!messageInput.trim() || !user) return;
 
+        // Stop typing indicator when sending
+        if (socket) {
+            if (chatType === 'conversation' && selectedConversation) {
+                socket.emit('typing_stop', { conversationId: selectedConversation.id });
+            }
+        }
+
         const tempMessage: Message = {
             id: Date.now(),
             conversationId: chatType === 'conversation' ? selectedConversation?.id || null : null,
             groupId: chatType === 'group' ? selectedGroup?.id || null : null,
+            roomId: chatType === 'room' ? selectedRoom?.id || null : null,
             senderId: user.id,
             content: messageInput.trim(),
             status: 'sent',
@@ -236,18 +482,62 @@ export default function ChatPage() {
         try {
             if (chatType === 'conversation' && selectedConversation) {
                 await messageAPI.send(selectedConversation.id, tempMessage.content);
-                // Reload conversations to update sidebar with new message
                 loadConversations();
             } else if (chatType === 'group' && selectedGroup) {
                 await groupAPI.sendMessage(selectedGroup.id, tempMessage.content);
-                // Reload groups to update sidebar with new message
                 loadGroups();
+            } else if (chatType === 'room' && selectedRoom) {
+                await roomAPI.sendMessage(selectedRoom.id, tempMessage.content);
             }
         } catch (error) {
             console.error('Error sending message:', error);
             setMessages((prev) => prev.filter((msg) => msg.id !== tempMessage.id));
         }
     };
+
+    // Handle typing indicator with debounce
+    const handleTyping = useCallback((value: string) => {
+        setMessageInput(value);
+
+        if (!socket) return;
+
+        // Emit typing start
+        if (value.trim()) {
+            if (chatType === 'conversation' && selectedConversation) {
+                socket.emit('typing_start', { conversationId: selectedConversation.id });
+            } else if (chatType === 'group' && selectedGroup) {
+                socket.emit('group_typing_start', { groupId: selectedGroup.id });
+            } else if (chatType === 'room' && selectedRoom) {
+                socket.emit('room_typing_start', { roomId: selectedRoom.id });
+            }
+
+            // Clear existing timeout
+            if (typingTimeoutRef.current) {
+                clearTimeout(typingTimeoutRef.current);
+            }
+
+            // Set new timeout to emit typing stop after 2 seconds of inactivity
+            typingTimeoutRef.current = setTimeout(() => {
+                if (chatType === 'conversation' && selectedConversation) {
+                    socket.emit('typing_stop', { conversationId: selectedConversation.id });
+                } else if (chatType === 'group' && selectedGroup) {
+                    socket.emit('group_typing_stop', { groupId: selectedGroup.id });
+                } else if (chatType === 'room' && selectedRoom) {
+                    socket.emit('room_typing_stop', { roomId: selectedRoom.id });
+                }
+            }, 2000);
+        } else {
+            // Empty input, stop typing immediately
+            if (chatType === 'conversation' && selectedConversation) {
+                socket.emit('typing_stop', { conversationId: selectedConversation.id });
+            } else if (chatType === 'group' && selectedGroup) {
+                socket.emit('group_typing_stop', { groupId: selectedGroup.id });
+            } else if (chatType === 'room' && selectedRoom) {
+                socket.emit('room_typing_stop', { roomId: selectedRoom.id });
+            }
+        }
+    }, [socket, chatType, selectedConversation, selectedGroup, selectedRoom]);
+
 
     // Search users with debounce
     useEffect(() => {
@@ -296,6 +586,105 @@ export default function ChatPage() {
         loadGroups();
     };
 
+    // Call handlers
+    const handleInitiateCall = async () => {
+        if (!user || !socket) return;
+
+        try {
+            let type: 'conversation' | 'group' | 'room';
+            let targetId: number;
+            let participants: number[] = [];
+
+            if (chatType === 'conversation' && selectedConversation) {
+                type = 'conversation';
+                targetId = selectedConversation.id;
+                participants = [user.id, selectedConversation.otherParticipant!.id];
+            } else if (chatType === 'group' && selectedGroup) {
+                type = 'group';
+                targetId = selectedGroup.id;
+                participants = selectedGroup.members?.map(m => m.id) || [];
+            } else if (chatType === 'room' && selectedRoom) {
+                type = 'room';
+                targetId = selectedRoom.id;
+                participants = selectedRoom.members?.map(m => m.id) || [];
+            } else {
+                return;
+            }
+
+            console.log('Initiating call:', { type, targetId });
+            const { roomName, token, url } = await callAPI.initiate(type, targetId);
+            console.log('Call initiated successfully:', { roomName });
+
+            setActiveCall({
+                roomName,
+                token,
+                url,
+                type,
+                targetId,
+                participants: participants.map(id => ({ id, username: 'User' }))
+            });
+
+            // Notify other participants
+            socket.emit('call:initiate', {
+                type,
+                targetId,
+                roomName,
+                participants
+            });
+        } catch (error: any) {
+            console.error('Error initiating call:', error);
+            alert(`Failed to start call: ${error.response?.data?.error || error.message || 'Unknown error'}`);
+        }
+    };
+
+    const handleAcceptCall = async () => {
+        if (!incomingCall || !socket) return;
+
+        try {
+            const { token, url } = await callAPI.join(incomingCall.roomName);
+
+            setActiveCall({
+                roomName: incomingCall.roomName,
+                token,
+                url,
+                type: incomingCall.type,
+                targetId: incomingCall.targetId,
+                participants: [incomingCall.initiator]
+            });
+
+            socket.emit('call:accept', {
+                roomName: incomingCall.roomName,
+                targetId: incomingCall.targetId
+            });
+
+            setIncomingCall(null);
+        } catch (error) {
+            console.error('Error accepting call:', error);
+        }
+    };
+
+    const handleRejectCall = () => {
+        if (!incomingCall || !socket) return;
+
+        socket.emit('call:reject', {
+            roomName: incomingCall.roomName,
+            initiatorId: incomingCall.initiator.id
+        });
+
+        setIncomingCall(null);
+    };
+
+    const handleEndCall = () => {
+        if (!activeCall || !socket) return;
+
+        socket.emit('call:end', {
+            roomName: activeCall.roomName,
+            participants: activeCall.participants.map(p => p.id)
+        });
+
+        setActiveCall(null);
+    };
+
     if (loading || !user) {
         return (
             <div className={styles.loading}>
@@ -306,6 +695,8 @@ export default function ChatPage() {
 
     return (
         <div className={styles.container}>
+
+
             {/* Sidebar */}
             <div className={`${styles.sidebar} ${sidebarCollapsed ? styles.collapsed : ''}`}>
                 <div className={styles.sidebarHeader}>
@@ -330,6 +721,70 @@ export default function ChatPage() {
                         )}
                     </svg>
                 </button>
+
+                {/* Rooms Sidebar (Collapsible Dropdown) */}
+                {(chatType === 'group' || chatType === 'room') && selectedGroup && groupRooms.length > 0 && (
+                    <div className={`${groupStyles.roomsSidebar} ${sidebarCollapsed ? groupStyles.collapsed : ''}`}>
+                        {!sidebarCollapsed && (
+                            <div
+                                className={groupStyles.roomsSidebarHeader}
+                                onClick={() => setRoomsExpanded(!roomsExpanded)}
+                            >
+                                <div className={groupStyles.roomsSidebarTitle}>
+                                    <svg
+                                        width="16"
+                                        height="16"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        className={`${groupStyles.dropdownIcon} ${roomsExpanded ? groupStyles.expanded : ''}`}
+                                    >
+                                        <path d="M9 18l6-6-6-6" />
+                                    </svg>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                                        <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                                    </svg>
+                                    Rooms ({groupRooms.length})
+                                </div>
+                                {selectedGroup.myRole === 'admin' && (
+                                    <button
+                                        className={groupStyles.addRoomButton}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleCreateRoom();
+                                        }}
+                                        title="Create Room"
+                                    >
+                                        +
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                        {!sidebarCollapsed && roomsExpanded && (
+                            <div className={groupStyles.roomsSidebarList}>
+                                {groupRooms.map((room) => (
+                                    <div
+                                        key={room.id}
+                                        className={`${groupStyles.roomItem} ${selectedRoom?.id === room.id ? groupStyles.active : ''}`}
+                                        onClick={() => handleSelectRoom(room)}
+                                    >
+                                        <div className={groupStyles.roomItemIcon}>
+                                            {getInitials(room.name)}
+                                        </div>
+                                        <div className={groupStyles.roomItemInfo}>
+                                            <div className={groupStyles.roomItemName}>{room.name}</div>
+                                            <div className={groupStyles.roomItemMembers}>
+                                                {room.memberCount || room.members?.length || 0} members
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {sidebarCollapsed ? (
                     <>
@@ -423,6 +878,10 @@ export default function ChatPage() {
                     </>
                 )}
 
+
+
+
+
                 <div className={styles.conversationList}>
                     {/* Groups Section */}
                     {!sidebarCollapsed && groups.length > 0 && (
@@ -494,6 +953,10 @@ export default function ChatPage() {
                 </div>
             </div>
 
+
+
+
+
             {/* Main Chat Area */}
             <div className={styles.mainArea}>
                 {chatType === 'conversation' && selectedConversation ? (
@@ -512,6 +975,15 @@ export default function ChatPage() {
                                     </div>
                                 </div>
                             </div>
+                            <button
+                                className={callStyles.callButton}
+                                onClick={handleInitiateCall}
+                                title="Start Call"
+                            >
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M15.05 5A5 5 0 0 1 19 8.95M15.05 1A9 9 0 0 1 23 8.94m-1 7.98v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                                </svg>
+                            </button>
                         </div>
 
                         <div className={styles.messagesContainer}>
@@ -539,11 +1011,16 @@ export default function ChatPage() {
                             )}
                         </div>
 
+                        {/* Typing Indicator */}
+                        {Object.keys(typingUsers).length > 0 && (
+                            <TypingIndicator username={Object.values(typingUsers)[0]} />
+                        )}
+
                         <form onSubmit={handleSendMessage} className={styles.messageInputContainer}>
                             <input
                                 type="text"
                                 value={messageInput}
-                                onChange={(e) => setMessageInput(e.target.value)}
+                                onChange={(e) => handleTyping(e.target.value)}
                                 placeholder="Type a message..."
                                 className={styles.messageInput}
                             />
@@ -560,14 +1037,119 @@ export default function ChatPage() {
                             </div>
                             <div className={groupStyles.groupHeaderInfo}>
                                 <div className={groupStyles.groupHeaderName}>{selectedGroup.name}</div>
-                                <div className={groupStyles.groupHeaderMemberCount}>
+                                <div
+                                    className={groupStyles.groupHeaderMemberCount}
+                                    style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                                    onClick={() => setShowGroupInfo(!showGroupInfo)}
+                                    title="View group details"
+                                >
                                     {selectedGroup.memberCount || selectedGroup.members?.length || 0} members
                                 </div>
                             </div>
                             <button
+                                className={callStyles.callButton}
+                                onClick={handleInitiateCall}
+                                title="Start Group Call"
+                            >
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M15.05 5A5 5 0 0 1 19 8.95M15.05 1A9 9 0 0 1 23 8.94m-1 7.98v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className={styles.messagesContainer}>
+                            {loadingMessages ? (
+                                <div className={styles.loadingText}>Loading messages...</div>
+                            ) : messages.length === 0 ? (
+                                <div className={styles.emptyState}>
+                                    No messages yet. Start the conversation!
+                                </div>
+                            ) : (
+                                messages.map((message) => (
+                                    <div
+                                        key={message.id}
+                                        className={`${styles.message} ${message.senderId === user.id ? styles.sent : styles.received}`}
+                                    >
+                                        {message.senderId !== user.id && (
+                                            <div className={groupStyles.messageSenderName}>
+                                                {message.sender?.username}
+                                            </div>
+                                        )}
+                                        <div className={styles.messageContent}>{message.content}</div>
+                                        <div className={styles.messageTime}>
+                                            {new Date(message.createdAt).toLocaleTimeString([], {
+                                                hour: '2-digit',
+                                                minute: '2-digit',
+                                            })}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        <form onSubmit={handleSendMessage} className={styles.messageInputContainer}>
+                            <input
+                                type="text"
+                                value={messageInput}
+                                onChange={(e) => handleTyping(e.target.value)}
+                                placeholder="Type a message..."
+                                className={styles.messageInput}
+                            />
+                            <button type="submit" className={styles.sendButton} disabled={!messageInput.trim()}>
+                                Send
+                            </button>
+                        </form>
+                    </>
+                ) : chatType === 'room' && selectedRoom ? (
+                    <>
+                        <div className={groupStyles.groupHeader}>
+                            <button
                                 className={groupStyles.infoButton}
-                                onClick={() => setShowGroupInfo(!showGroupInfo)}
-                                title="Group Info"
+                                onClick={() => {
+                                    setChatType('group');
+                                    setSelectedRoom(null);
+                                    setShowRoomInfo(false);
+                                    // Reload group messages when going back
+                                    if (selectedGroup) {
+                                        loadGroupMessages(selectedGroup.id);
+                                    }
+                                }}
+                                title="Back to Group"
+                                style={{ marginRight: '8px' }}
+                            >
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M15 18l-6-6 6-6" />
+                                </svg>
+                            </button>
+                            <div className={groupStyles.groupHeaderAvatar} style={{ borderRadius: '8px' }}>
+                                {getInitials(selectedRoom.name)}
+                            </div>
+                            <div className={groupStyles.groupHeaderInfo}>
+                                <div className={groupStyles.groupHeaderName}>{selectedRoom.name}</div>
+                                <div className={groupStyles.groupHeaderMemberCount}>
+                                    {selectedRoom.memberCount || selectedRoom.members?.length || 0} members • Room
+                                </div>
+                            </div>
+                            <button
+                                className={callStyles.callButton}
+                                onClick={handleInitiateCall}
+                                title="Start Room Call"
+                                style={{ marginRight: '8px' }}
+                            >
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M15.05 5A5 5 0 0 1 19 8.95M15.05 1A9 9 0 0 1 23 8.94m-1 7.98v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                                </svg>
+                            </button>
+                            <button
+                                className={groupStyles.infoButton}
+                                onClick={async () => {
+                                    if (selectedGroup) {
+                                        const { group } = await groupAPI.getById(selectedGroup.id);
+                                        setGroupMembersForRoom(group.members || []);
+                                    }
+                                    setShowRoomInfo(!showRoomInfo);
+                                }}
+                                title="Room Info"
                             >
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <circle cx="12" cy="12" r="10"></circle>
@@ -611,7 +1193,7 @@ export default function ChatPage() {
                             <input
                                 type="text"
                                 value={messageInput}
-                                onChange={(e) => setMessageInput(e.target.value)}
+                                onChange={(e) => handleTyping(e.target.value)}
                                 placeholder="Type a message..."
                                 className={styles.messageInput}
                             />
@@ -642,6 +1224,21 @@ export default function ChatPage() {
                     onMemberAdded={loadGroups}
                     onMemberRemoved={loadGroups}
                     onLeaveGroup={handleLeaveGroup}
+                    onSelectRoom={handleSelectRoom}
+                    onCreateRoom={handleCreateRoom}
+                />
+            )}
+
+            {/* Room Info Panel */}
+            {showRoomInfo && selectedRoom && selectedGroup && (
+                <RoomInfoPanel
+                    room={selectedRoom}
+                    groupMembers={groupMembersForRoom}
+                    currentUserId={user.id}
+                    onClose={() => setShowRoomInfo(false)}
+                    onLeave={handleLeaveRoom}
+                    onDelete={handleDeleteRoom}
+                    onMemberChange={() => { }}
                 />
             )}
 
@@ -652,7 +1249,33 @@ export default function ChatPage() {
                 onGroupCreated={handleGroupCreated}
                 currentUserId={user.id}
             />
+
+            {/* Create Room Modal */}
+            {showCreateRoomModal && selectedGroup && (
+                <CreateRoomModal
+                    groupId={selectedGroup.id}
+                    groupMembers={groupMembersForRoom}
+                    onClose={() => setShowCreateRoomModal(false)}
+                    onRoomCreated={handleRoomCreated}
+                />
+            )}
+
+            {/* Incoming Call Modal */}
+            {incomingCall && (
+                <IncomingCallModal
+                    call={incomingCall}
+                    onAccept={handleAcceptCall}
+                    onReject={handleRejectCall}
+                />
+            )}
+
+            {/* Active Call Modal */}
+            {activeCall && (
+                <CallModal
+                    call={activeCall}
+                    onEnd={handleEndCall}
+                />
+            )}
         </div>
     );
 }
-

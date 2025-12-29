@@ -1,0 +1,417 @@
+/* Call Modal Overlay */
+.modalOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #000;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.callContainer {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: #1a1a1a;
+}
+
+.liveKitRoom {
+    flex: 1;
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+/* Call Interface */
+.callInterface {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    background: #0f0f0f;
+}
+
+/* Video Grid */
+.videoGrid {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.videoContainer {
+    position: relative;
+    flex: 1;
+    min-width: 400px;
+    max-width: 100%;
+    aspect-ratio: 16/9;
+    background: #000;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.videoElement {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.participantName {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(10px);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+/* Waiting Message */
+.waitingMessage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    text-align: center;
+}
+
+.waitingIcon {
+    font-size: 4rem;
+    margin-bottom: 16px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.waitingMessage p {
+    font-size: 1.125rem;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* Local Video (Picture-in-Picture) */
+.localVideo {
+    position: absolute;
+    bottom: 100px;
+    right: 24px;
+    width: 240px;
+    aspect-ratio: 16/9;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    z-index: 10;
+}
+
+.localVideoElement {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.localLabel {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(10px);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* Controls */
+.controls {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 24px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, transparent 100%);
+    display: flex;
+    justify-content: center;
+    z-index: 20;
+}
+
+.controlsInner {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+
+.controlButton {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.controlButton:hover {
+    background: rgba(255, 255, 255, 0.25);
+    transform: translateY(-2px);
+}
+
+.controlButton:active {
+    transform: translateY(0);
+}
+
+/* Muted/disabled state */
+.controlButton[data-lk-enabled="false"] {
+    background: rgba(239, 68, 68, 0.8);
+    border-color: rgba(239, 68, 68, 1);
+}
+
+.controlButton[data-lk-enabled="false"]:hover {
+    background: rgba(239, 68, 68, 0.9);
+}
+
+.endCallButton {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    border-color: #dc2626;
+    width: 64px;
+    height: 64px;
+}
+
+.endCallButton:hover {
+    background: linear-gradient(135deg, #dc2626, #b91c1c);
+    box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4);
+}
+
+/* Connecting State */
+.connecting {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: white;
+    z-index: 100;
+}
+
+.connecting p {
+    margin-top: 16px;
+    font-size: 1.125rem;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.spinner {
+    width: 56px;
+    height: 56px;
+    border: 4px solid rgba(255, 255, 255, 0.2);
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    50% {
+        transform: scale(1.05);
+        opacity: 0.8;
+    }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .videoContainer {
+        min-width: 100%;
+    }
+
+    .localVideo {
+        width: 160px;
+        bottom: 120px;
+        right: 16px;
+    }
+
+    .controlButton {
+        width: 48px;
+        height: 48px;
+    }
+
+    .endCallButton {
+        width: 56px;
+        height: 56px;
+    }
+}
+
+/* Incoming Call Modal (keep existing styles) */
+.incomingCallOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.incomingCallModal {
+    background: var(--surface);
+    border-radius: 20px;
+    padding: 40px;
+    max-width: 400px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.incomingCallIcon {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary-color), var(--primary-hover));
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 24px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.incomingCallTitle {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 12px;
+}
+
+.incomingCallFrom {
+    font-size: 1.125rem;
+    color: var(--text-primary);
+    margin: 0 0 8px;
+    font-weight: 500;
+}
+
+.incomingCallType {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin: 0 0 32px;
+}
+
+.incomingCallActions {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+}
+
+.callActionButton {
+    flex: 1;
+    padding: 14px 24px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.9375rem;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.acceptButton {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+}
+
+.acceptButton:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
+}
+
+.rejectButton {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+}
+
+.rejectButton:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(239, 68, 68, 0.3);
+}
+
+/* Call Button in Chat Header */
+.callButton {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.callButton:hover {
+    background: var(--primary-light);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.callButton:active {
+    transform: scale(0.95);
+}

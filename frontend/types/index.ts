@@ -10,6 +10,7 @@ export interface Message {
     id: number;
     conversationId?: number | null;
     groupId?: number | null;
+    roomId?: number | null;
     senderId: number;
     content: string;
     status: 'sent' | 'delivered' | 'read';
@@ -46,6 +47,24 @@ export interface Group {
     myRole?: 'admin' | 'member';
 }
 
+export interface RoomMember extends User {
+    role: 'admin' | 'member';
+    joinedAt: string;
+}
+
+export interface Room {
+    id: number;
+    name: string;
+    groupId: number;
+    createdBy: number;
+    createdAt: string;
+    creator?: User;
+    members?: RoomMember[];
+    memberCount?: number;
+    lastMessage?: Message | null;
+    myRole?: 'admin' | 'member';
+}
+
 export interface AuthResponse {
     message: string;
     token: string;
@@ -61,6 +80,7 @@ export interface MessageHistoryResponse {
     messages: Message[];
     conversationId?: number;
     groupId?: number;
+    roomId?: number;
 }
 
 export interface UserSearchResponse {
@@ -77,3 +97,11 @@ export interface GroupResponse {
     myRole: 'admin' | 'member';
 }
 
+export interface RoomListResponse {
+    rooms: Room[];
+}
+
+export interface RoomResponse {
+    room: Room;
+    myRole: 'admin' | 'member';
+}

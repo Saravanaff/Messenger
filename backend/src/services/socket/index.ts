@@ -8,7 +8,7 @@ let io: Server;
 export const initializeSocket = (server: HTTPServer): Server => {
     io = new Server(server, {
         cors: {
-            origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+            origin: true,
             credentials: true,
         },
     });
@@ -91,6 +91,111 @@ export const initializeSocket = (server: HTTPServer): Server => {
             socket.to(`group:${data.groupId}`).emit('group_user_stopped_typing', {
                 userId,
                 groupId: data.groupId,
+            });
+        });
+
+        // Join room
+        socket.on('join_room', (roomId: number) => {
+            socket.join(`room:${roomId}`);
+            console.log(`User ${userId} joined room ${roomId}`);
+        });
+
+        // Leave room
+        socket.on('leave_room', (roomId: number) => {
+            socket.leave(`room:${roomId}`);
+            console.log(`User ${userId} left room ${roomId}`);
+        });
+
+        // Typing indicators for rooms
+        socket.on('room_typing_start', (data: { roomId: number }) => {
+            socket.to(`room:${data.roomId}`).emit('room_user_typing', {
+                userId,
+                roomId: data.roomId,
+            });
+        });
+
+        socket.on('room_typing_stop', (data: { roomId: number }) => {
+            socket.to(`room:${data.roomId}`).emit('room_user_stopped_typing', {
+                userId,
+                roomId: data.roomId,
+            });
+        });
+
+        // Call events - Enhanced ringing flow
+        socket.on('call:initiate', (data: { type: string; targetId: number; roomName: string; participants: number[] }) => {
+            console.log(`User ${userId} initiating call in ${data.roomName}`);
+
+            // Notify all participants except the initiator with ringing state
+            data.participants.forEach((participantId) => {
+                if (participantId !== userId) {
+                    io.to(`user:${participantId}`).emit('call:incoming', {
+                        roomName: data.roomName,
+                        type: data.type,
+                        targetId: data.targetId,
+                        initiator: {
+                            id: userId,
+                            username: socket.data.user.username
+                        },
+                        state: 'ringing'
+                    });
+                }
+            });
+
+            // Set timeout for call (30 seconds)
+            setTimeout(() => {
+                io.to(`user:${userId}`).emit('call:timeout', {
+                    roomName: data.roomName
+                });
+            }, 30000);
+        });
+
+        socket.on('call:accept', (data: { roomName: string; targetId: number }) => {
+            console.log(`User ${userId} accepted call ${data.roomName}`);
+            // Notify all participants in the room that user accepted
+            io.to(data.roomName).emit('call:participant_joined', {
+                userId,
+                username: socket.data.user.username
+            });
+            // Notify the initiator specifically
+            socket.to(data.roomName).emit('call:accepted', {
+                userId,
+                username: socket.data.user.username,
+                roomName: data.roomName
+            });
+        });
+
+        socket.on('call:reject', (data: { roomName: string; initiatorId: number }) => {
+            console.log(`User ${userId} rejected call ${data.roomName}`);
+            // Notify the initiator
+            io.to(`user:${data.initiatorId}`).emit('call:rejected', {
+                userId,
+                username: socket.data.user.username,
+                roomName: data.roomName
+            });
+        });
+
+        socket.on('call:end', (data: { roomName: string; participants: number[] }) => {
+            console.log(`User ${userId} ended call ${data.roomName}`);
+            // Notify all participants
+            data.participants.forEach((participantId) => {
+                io.to(`user:${participantId}`).emit('call:ended', {
+                    roomName: data.roomName,
+                    endedBy: userId
+                });
+            });
+        });
+
+        socket.on('call:participant_left', (data: { roomName: string; participants: number[] }) => {
+            console.log(`User ${userId} left call ${data.roomName}`);
+            // Notify remaining participants
+            data.participants.forEach((participantId) => {
+                if (participantId !== userId) {
+                    io.to(`user:${participantId}`).emit('call:participant_disconnected', {
+                        roomName: data.roomName,
+                        userId,
+                        username: socket.data.user.username
+                    });
+                }
             });
         });
 

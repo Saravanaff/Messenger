@@ -16,14 +16,11 @@ const PORT = process.env.BACKEND_PORT || 5000;
 
 // Middleware
 app.use(cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    origin: true, // Allow all origins
     credentials: true,
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Routes
-app.use('/api', routes);
 
 // Error handling middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
@@ -41,8 +38,8 @@ const initializeServices = async () => {
         await sequelize.authenticate();
         console.log('✅ Database connection established');
 
-        // Sync database models
-        await sequelize.sync();
+        // Sync database models (alter: true to update existing tables with new columns)
+        await sequelize.sync({ alter: true });
         console.log('✅ Database models synchronized');
 
         // Initialize Socket.io
@@ -55,6 +52,9 @@ const initializeServices = async () => {
             next();
         });
 
+        // Mount routes after Socket.IO middleware
+        app.use('/api', routes);
+
         // Verify Redis connection
         await redisClient.ping();
         console.log('✅ Redis client connected');
@@ -64,15 +64,12 @@ const initializeServices = async () => {
     }
 };
 
-// Graceful shutdown
 const gracefulShutdown = async () => {
     console.log('\n🛑 Shutting down gracefully...');
 
     try {
-        // Close database connection
         await sequelize.close();
 
-        // Close Redis connection
         await redisClient.quit();
 
         console.log('✅ All services shut down successfully');
@@ -83,18 +80,18 @@ const gracefulShutdown = async () => {
     }
 };
 
-// Handle shutdown signals
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
-// Start server
 const startServer = async () => {
     try {
         await initializeServices();
 
-        server.listen(PORT, () => {
-            console.log(`🚀 Server running on port ${PORT}`);
+        const HOST = process.env.HOST || '0.0.0.0';
+        server.listen(PORT as number, HOST, () => {
+            console.log(`🚀 Server running on ${HOST}:${PORT}`);
             console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+            console.log(`🌐 Accessible from network at: http://10.168.113.168:${PORT}`);
         });
     } catch (error) {
         console.error('Failed to start server:', error);

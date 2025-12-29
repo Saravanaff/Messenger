@@ -10,6 +10,9 @@ import type {
     GroupListResponse,
     GroupResponse,
     Message,
+    Room,
+    RoomListResponse,
+    RoomResponse,
 } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
@@ -35,15 +38,21 @@ api.interceptors.request.use(
     }
 );
 
+
 // Response interceptor for error handling
 api.interceptors.response.use(
     (response) => response,
     (error) => {
         if (error.response?.status === 401) {
-            // Token expired or invalid
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            window.location.href = '/login';
+            // Don't auto-logout on call API errors - let the component handle it
+            const isCallEndpoint = error.config?.url?.includes('/calls/');
+
+            if (!isCallEndpoint) {
+                // Token expired or invalid
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/login';
+            }
         }
         return Promise.reject(error);
     }
@@ -120,6 +129,10 @@ export const messageAPI = {
     markAsRead: async (messageId: number): Promise<void> => {
         await api.put(`/messages/${messageId}/read`);
     },
+
+    markConversationAsRead: async (conversationId: number, lastMessageId?: number): Promise<void> => {
+        await api.post(`/messages/conversation/${conversationId}/mark-read`, { lastMessageId });
+    },
 };
 
 // Group API
@@ -172,5 +185,68 @@ export const groupAPI = {
     },
 };
 
+// Room API
+export const roomAPI = {
+    create: async (groupId: number, name: string, memberIds: number[]): Promise<{ room: Room }> => {
+        const { data } = await api.post<{ room: Room }>(`/groups/${groupId}/rooms`, { name, memberIds });
+        return data;
+    },
+
+    getAll: async (groupId: number): Promise<RoomListResponse> => {
+        const { data } = await api.get<RoomListResponse>(`/groups/${groupId}/rooms`);
+        return data;
+    },
+
+    getById: async (roomId: number): Promise<RoomResponse> => {
+        const { data } = await api.get<RoomResponse>(`/rooms/${roomId}`);
+        return data;
+    },
+
+    delete: async (roomId: number): Promise<void> => {
+        await api.delete(`/rooms/${roomId}`);
+    },
+
+    addMember: async (roomId: number, userId: number): Promise<void> => {
+        await api.post(`/rooms/${roomId}/members`, { userId });
+    },
+
+    removeMember: async (roomId: number, userId: number): Promise<void> => {
+        await api.delete(`/rooms/${roomId}/members/${userId}`);
+    },
+
+    leave: async (roomId: number): Promise<void> => {
+        await api.post(`/rooms/${roomId}/leave`);
+    },
+
+    sendMessage: async (roomId: number, content: string): Promise<{ message: Message }> => {
+        const { data } = await api.post<{ message: Message }>(`/rooms/${roomId}/messages`, { content });
+        return data;
+    },
+
+    getMessages: async (roomId: number, limit = 50, offset = 0): Promise<MessageHistoryResponse> => {
+        const { data } = await api.get<MessageHistoryResponse>(`/rooms/${roomId}/messages`, {
+            params: { limit, offset },
+        });
+        return data;
+    },
+};
+
+// Call API
+export const callAPI = {
+    initiate: async (type: 'conversation' | 'group' | 'room', targetId: number): Promise<{ roomName: string; token: string; url: string }> => {
+        const { data } = await api.post<{ roomName: string; token: string; url: string }>('/calls/initiate', {
+            type,
+            targetId,
+        });
+        return data;
+    },
+
+    join: async (roomName: string): Promise<{ token: string; url: string }> => {
+        const { data } = await api.post<{ token: string; url: string }>(`/calls/join/${roomName}`);
+        return data;
+    },
+};
+
 export default api;
+
 

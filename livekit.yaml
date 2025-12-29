@@ -1,0 +1,18 @@
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+
+rtc:
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: false
+  # Use localhost for development
+  udp_port: 7882
+  tcp_port: 7881
+  
+# Development keys
+keys:
+  devkey: devsecret
+
+logging:
+  level: info
