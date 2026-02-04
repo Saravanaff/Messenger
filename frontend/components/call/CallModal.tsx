@@ -92,6 +92,66 @@ function CallInterface({ onEnd }: { onEnd: () => void }) {
 
 export default function CallModal({ call, onEnd }: CallModalProps) {
     const [isConnected, setIsConnected] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        // Find if we are in a secure context or localhost
+        const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+        // Check for media devices support only if we are in browser
+        if (typeof navigator !== 'undefined') {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                if (!isSecure) {
+                    setError("Video calls require HTTPS. Please establish a secure connection or use localhost.");
+                } else {
+                    setError("Media devices are not supported or accessible in this browser.");
+                }
+            }
+        }
+    }, []);
+
+    const handleDisconnect = () => {
+        setIsConnected(false);
+        onEnd();
+    };
+
+    if (error) {
+        return (
+            <div className={styles.modalOverlay}>
+                <div className={styles.callContainer}>
+                    <div className={styles.errorContainer} style={{
+                        padding: '2rem',
+                        textAlign: 'center',
+                        color: 'white',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        height: '100%'
+                    }}>
+                        <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>⚠️</div>
+                        <h3 className={styles.errorTitle} style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>Call Error</h3>
+                        <p className={styles.errorMessage} style={{ marginBottom: '2rem', opacity: 0.9 }}>{error}</p>
+                        <button
+                            onClick={onEnd}
+                            style={{
+                                padding: '0.8rem 2rem',
+                                background: '#ef4444',
+                                border: 'none',
+                                borderRadius: '8px',
+                                color: 'white',
+                                cursor: 'pointer',
+                                fontSize: '1rem',
+                                fontWeight: 500
+                            }}
+                        >
+                            Close
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className={styles.modalOverlay}>
@@ -103,14 +163,15 @@ export default function CallModal({ call, onEnd }: CallModalProps) {
                     audio={true}
                     video={true}
                     onConnected={() => setIsConnected(true)}
-                    onDisconnected={() => {
-                        setIsConnected(false);
-                        onEnd();
+                    onDisconnected={handleDisconnect}
+                    onError={(err) => {
+                        console.error("LiveKit Room Error:", err);
+                        setError(`Connection error: ${err.message}`);
                     }}
                     className={styles.liveKitRoom}
                 >
                     {isConnected ? (
-                        <CallInterface onEnd={onEnd} />
+                        <CallInterface onEnd={handleDisconnect} />
                     ) : (
                         <div className={styles.connecting}>
                             <div className={styles.spinner}></div>
