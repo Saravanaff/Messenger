@@ -10,7 +10,7 @@ import {
     TrackToggle,
     DisconnectButton,
 } from '@livekit/components-react';
-import '@livekit/components-styles';
+import '@livekit/components-styles/prefabs';
 import { Track } from 'livekit-client';
 import styles from '../../styles/CallModal.module.css';
 import { ActiveCall } from '@/types/call';
@@ -18,6 +18,7 @@ import { ActiveCall } from '@/types/call';
 interface CallModalProps {
     call: ActiveCall;
     onEnd: () => void;
+    isRinging?: boolean;
 }
 
 function CallInterface({ onEnd }: { onEnd: () => void }) {
@@ -90,7 +91,7 @@ function CallInterface({ onEnd }: { onEnd: () => void }) {
     );
 }
 
-export default function CallModal({ call, onEnd }: CallModalProps) {
+export default function CallModal({ call, onEnd, isRinging = false }: CallModalProps) {
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -170,7 +171,13 @@ export default function CallModal({ call, onEnd }: CallModalProps) {
                     }}
                     className={styles.liveKitRoom}
                 >
-                    {isConnected ? (
+                    {isRinging ? (
+                        <div className={styles.connecting}>
+                            <div className={styles.waitingIcon}>📞</div>
+                            <p style={{ fontSize: '1.25rem', marginTop: '1rem' }}>Calling...</p>
+                            <p style={{ fontSize: '0.875rem', color: 'rgba(255, 255, 255, 0.6)', marginTop: '0.5rem' }}>Waiting for response</p>
+                        </div>
+                    ) : isConnected ? (
                         <CallInterface onEnd={handleDisconnect} />
                     ) : (
                         <div className={styles.connecting}>

@@ -62,7 +62,17 @@ export const sendMessage = async (req: Request, res: Response): Promise<void> =>
             console.log(`👥 Clients in room: ${clientCount}`);
             console.log(`📨 Message data:`, { id: fullMessage.id, content: fullMessage.content, senderId: fullMessage.senderId });
 
+            // Emit to conversation room (for users who have the conversation open)
             io.to(roomName).emit('new_message', fullMessage);
+
+            // Also emit to both participants' personal rooms to ensure they get the message
+            // even if they haven't joined the conversation room yet (new conversation)
+            const recipientId = conversation.participant1Id === userId 
+                ? conversation.participant2Id 
+                : conversation.participant1Id;
+            
+            console.log(`📤 Emitting new_message to recipient's personal room: user:${recipientId}`);
+            io.to(`user:${recipientId}`).emit('new_message', fullMessage);
         } else {
             console.error('❌ Socket.IO instance not available or message not found!');
         }

@@ -63,7 +63,38 @@ export const getOrCreateConversation = async (
             });
         }
 
-        res.json({ conversation });
+        if (!conversation) {
+            res.status(500).json({ error: 'Failed to create conversation' });
+            return;
+        }
+
+        // Get the other participant
+        const otherParticipant =
+            conversation.participant1Id === currentUserId 
+                ? conversation.participant2 
+                : conversation.participant1;
+
+        // Check if other participant is online
+        const isOnline = await CacheService.isUserOnline(otherParticipant.id);
+
+        // Get last message
+        const lastMessage = await Message.findOne({
+            where: { conversationId: conversation.id },
+            order: [['createdAt', 'DESC']],
+            include: [{ model: User, as: 'sender', attributes: ['id', 'username'] }],
+        });
+
+        // Format response similar to getUserConversations
+        const formattedConversation = {
+            ...conversation.toJSON(),
+            lastMessage: lastMessage?.toJSON() || null,
+            otherParticipant: {
+                ...otherParticipant.toJSON(),
+                isOnline,
+            },
+        };
+
+        res.json({ conversation: formattedConversation });
     } catch (error: any) {
         console.error('Get/Create conversation error:', error);
         res.status(500).json({ error: 'Server error' });

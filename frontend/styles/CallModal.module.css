@@ -149,54 +149,111 @@
 
 .controlsInner {
     display: flex;
-    gap: 16px;
+    gap: 20px;
     align-items: center;
 }
 
 .controlButton {
-    width: 56px;
-    height: 56px;
+    width: 60px;
+    height: 60px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.15);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(20px);
+    border: 2px solid rgba(255, 255, 255, 0.2);
     color: white;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.controlButton::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transform: translate(-50%, -50%);
+    transition: width 0.4s, height 0.4s;
+}
+
+.controlButton:hover::before {
+    width: 100%;
+    height: 100%;
 }
 
 .controlButton:hover {
-    background: rgba(255, 255, 255, 0.25);
-    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.4);
+    transform: translateY(-4px) scale(1.05);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
 }
 
 .controlButton:active {
-    transform: translateY(0);
+    transform: translateY(-2px) scale(1);
 }
 
-/* Muted/disabled state */
+.controlButton svg {
+    position: relative;
+    z-index: 1;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+/* Muted/disabled state - when microphone or camera is off */
 .controlButton[data-lk-enabled="false"] {
-    background: rgba(239, 68, 68, 0.8);
-    border-color: rgba(239, 68, 68, 1);
+    background: rgba(239, 68, 68, 0.85);
+    border-color: rgba(220, 38, 38, 0.8);
+}
+
+.controlButton[data-lk-enabled="false"]::before {
+    background: rgba(185, 28, 28, 0.3);
 }
 
 .controlButton[data-lk-enabled="false"]:hover {
-    background: rgba(239, 68, 68, 0.9);
+    background: rgba(220, 38, 38, 0.9);
+    border-color: rgba(185, 28, 28, 1);
+    box-shadow: 0 8px 20px rgba(239, 68, 68, 0.4);
+}
+
+/* Enabled/active state - when mic or camera is on */
+.controlButton[data-lk-enabled="true"] {
+    background: rgba(34, 197, 94, 0.15);
+    border-color: rgba(34, 197, 94, 0.3);
+}
+
+.controlButton[data-lk-enabled="true"]:hover {
+    background: rgba(34, 197, 94, 0.25);
+    border-color: rgba(34, 197, 94, 0.5);
+    box-shadow: 0 8px 20px rgba(34, 197, 94, 0.3);
 }
 
 .endCallButton {
-    background: linear-gradient(135deg, #ef4444, #dc2626);
-    border-color: #dc2626;
-    width: 64px;
-    height: 64px;
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    border-color: #b91c1c;
+    width: 68px;
+    height: 68px;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+}
+
+.endCallButton::before {
+    background: rgba(185, 28, 28, 0.4);
 }
 
 .endCallButton:hover {
-    background: linear-gradient(135deg, #dc2626, #b91c1c);
-    box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4);
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    border-color: #991b1b;
+    box-shadow: 0 12px 32px rgba(239, 68, 68, 0.6);
+    transform: translateY(-4px) scale(1.08);
+}
+
+.endCallButton:active {
+    transform: translateY(-2px) scale(1.02);
 }
 
 /* Connecting State */

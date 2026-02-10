@@ -66,6 +66,7 @@ export default function ChatPage() {
     // Call state
     const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
     const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
+    const [isRinging, setIsRinging] = useState(false);
 
     // Typing indicator state
     const [typingUsers, setTypingUsers] = useState<{ [key: string]: string }>({}); // key: userId, value: username
@@ -219,9 +220,18 @@ export default function ChatPage() {
             setIncomingCall(data);
         });
 
+        socket.on('call:accepted', ({ userId, username, roomName }) => {
+            console.log(`Call accepted by ${username}`);
+            // Stop ringing when other party accepts
+            if (activeCall && activeCall.roomName === roomName) {
+                setIsRinging(false);
+            }
+        });
+
         socket.on('call:rejected', ({ userId, username, roomName }) => {
             console.log(`Call rejected by ${username}`);
-            // Could show a notification here
+            setIsRinging(false);
+            setActiveCall(null);
         });
 
         socket.on('call:ended', ({ roomName, endedBy }) => {
@@ -235,6 +245,7 @@ export default function ChatPage() {
             console.log(`Call timed out: ${roomName}`);
             if (activeCall && activeCall.roomName === roomName) {
                 setActiveCall(null);
+                setIsRinging(false);
             }
         });
 
@@ -242,6 +253,63 @@ export default function ChatPage() {
             console.log(`${username} disconnected from call`);
             if (activeCall && activeCall.roomName === roomName) {
                 // Could show notification or end call
+            }
+        });
+
+        // User online/offline status
+        socket.on('user_online', ({ userId }: { userId: number }) => {
+            console.log(`User ${userId} is now online`);
+            // Update conversation list
+            setConversations(prev => prev.map(conv => {
+                if (conv.otherParticipant?.id === userId) {
+                    return {
+                        ...conv,
+                        otherParticipant: {
+                            ...conv.otherParticipant,
+                            isOnline: true
+                        }
+                    };
+                }
+                return conv;
+            }));
+
+            // Update selected conversation if it's the one that came online
+            if (selectedConversation?.otherParticipant?.id === userId) {
+                setSelectedConversation(prev => prev ? {
+                    ...prev,
+                    otherParticipant: prev.otherParticipant ? {
+                        ...prev.otherParticipant,
+                        isOnline: true
+                    } : undefined
+                } : null);
+            }
+        });
+
+        socket.on('user_offline', ({ userId }: { userId: number }) => {
+            console.log(`User ${userId} is now offline`);
+            // Update conversation list
+            setConversations(prev => prev.map(conv => {
+                if (conv.otherParticipant?.id === userId) {
+                    return {
+                        ...conv,
+                        otherParticipant: {
+                            ...conv.otherParticipant,
+                            isOnline: false
+                        }
+                    };
+                }
+                return conv;
+            }));
+
+            // Update selected conversation if it's the one that went offline
+            if (selectedConversation?.otherParticipant?.id === userId) {
+                setSelectedConversation(prev => prev ? {
+                    ...prev,
+                    otherParticipant: prev.otherParticipant ? {
+                        ...prev.otherParticipant,
+                        isOnline: false
+                    } : undefined
+                } : null);
             }
         });
 
@@ -258,10 +326,13 @@ export default function ChatPage() {
             socket.off('message_read_receipt');
             socket.off('messages_read');
             socket.off('call:incoming');
+            socket.off('call:accepted');
             socket.off('call:rejected');
             socket.off('call:ended');
             socket.off('call:timeout');
             socket.off('call:participant_disconnected');
+            socket.off('user_online');
+            socket.off('user_offline');
         };
     }, [socket, selectedConversation, selectedGroup, selectedRoom, chatType, user, activeCall]);
 
@@ -615,6 +686,8 @@ export default function ChatPage() {
             const { roomName, token, url } = await callAPI.initiate(type, targetId);
             console.log('Call initiated successfully:', { roomName });
 
+            // Set ringing state instead of activeCall for initiator
+            setIsRinging(true);
             setActiveCall({
                 roomName,
                 token,
@@ -638,7 +711,7 @@ export default function ChatPage() {
     };
 
     const handleAcceptCall = async () => {
-        if (!incomingCall || !socket) return;
+        if (!incomingCall || !socket || !user) return;
 
         try {
             const { token, url } = await callAPI.join(incomingCall.roomName);
@@ -652,9 +725,12 @@ export default function ChatPage() {
                 participants: [incomingCall.initiator]
             });
 
+            // Notify initiator that we accepted
             socket.emit('call:accept', {
                 roomName: incomingCall.roomName,
-                targetId: incomingCall.targetId
+                targetId: incomingCall.targetId,
+                userId: user.id,
+                username: user.username
             });
 
             setIncomingCall(null);
@@ -683,6 +759,7 @@ export default function ChatPage() {
         });
 
         setActiveCall(null);
+        setIsRinging(false);
     };
 
     if (loading || !user) {
@@ -1274,6 +1351,7 @@ export default function ChatPage() {
                 <CallModal
                     call={activeCall}
                     onEnd={handleEndCall}
+                    isRinging={isRinging}
                 />
             )}
         </div>
