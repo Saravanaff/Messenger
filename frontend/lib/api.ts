@@ -245,6 +245,11 @@ export const callAPI = {
         const { data } = await api.post<{ token: string; url: string }>(`/calls/join/${roomName}`);
         return data;
     },
+
+    checkBusy: async (userIds: number[]): Promise<{ busyUserIds: number[] }> => {
+        const { data } = await api.post<{ busyUserIds: number[] }>('/calls/check-busy', { userIds });
+        return data;
+    },
 };
 
 export default api;

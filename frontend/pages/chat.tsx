@@ -78,13 +78,14 @@ export default function ChatPage() {
 
   // Sidebar state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [roomsExpanded, setRoomsExpanded] = useState(true);
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
 
   // Call state
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [isRinging, setIsRinging] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [busyUserIds, setBusyUserIds] = useState<number[]>([]);
 
   // Typing indicator state
   const [typingUsers, setTypingUsers] = useState<{ [key: string]: string }>({}); // key: userId, value: username
@@ -356,6 +357,14 @@ export default function ChatPage() {
       },
     );
 
+    // Handle user busy event for 1-on-1 calls
+    socket.on("call:user_busy", ({ roomName }) => {
+      console.log("User is busy on another call");
+      setIsRinging(false);
+      setActiveCall(null);
+      alert("User is on another call. Please try again later.");
+    });
+
     // User online/offline status
     socket.on("user_online", ({ userId }: { userId: number }) => {
       console.log(`User ${userId} is now online`);
@@ -447,6 +456,7 @@ export default function ChatPage() {
       socket.off("call:ended");
       socket.off("call:timeout");
       socket.off("call:participant_disconnected");
+      socket.off("call:user_busy");
       socket.off("user_online");
       socket.off("user_offline");
     };
@@ -959,7 +969,21 @@ export default function ChatPage() {
     setIsRinging(false);
   };
 
-  const handleInviteToCall = () => {
+  const handleInviteToCall = async () => {
+    // Fetch busy status for all group members
+    if (activeCall && (activeCall.groupMembers || selectedGroup)) {
+      const members = activeCall.groupMembers || selectedGroup?.members || [];
+      const memberIds = members.map((m) => m.id);
+      
+      try {
+        const { busyUserIds: busy } = await callAPI.checkBusy(memberIds);
+        setBusyUserIds(busy);
+      } catch (error) {
+        console.error("Error checking busy status:", error);
+        setBusyUserIds([]);
+      }
+    }
+    
     setShowInviteModal(true);
   };
 
@@ -1028,83 +1052,7 @@ export default function ChatPage() {
           </svg>
         </button>
 
-        {/* Rooms Sidebar (Collapsible Dropdown) */}
-        {(chatType === "group" || chatType === "room") &&
-          selectedGroup &&
-          groupRooms.length > 0 && (
-            <div
-              className={`${groupStyles.roomsSidebar} ${sidebarCollapsed ? groupStyles.collapsed : ""}`}
-            >
-              {!sidebarCollapsed && (
-                <div
-                  className={groupStyles.roomsSidebarHeader}
-                  onClick={() => setRoomsExpanded(!roomsExpanded)}
-                >
-                  <div className={groupStyles.roomsSidebarTitle}>
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className={`${groupStyles.dropdownIcon} ${roomsExpanded ? groupStyles.expanded : ""}`}
-                    >
-                      <path d="M9 18l6-6-6-6" />
-                    </svg>
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                      <polyline points="9 22 9 12 15 12 15 22"></polyline>
-                    </svg>
-                    Rooms ({groupRooms.length})
-                  </div>
-                  {selectedGroup.myRole === "admin" && (
-                    <button
-                      className={groupStyles.addRoomButton}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCreateRoom();
-                      }}
-                      title="Create Room"
-                    >
-                      +
-                    </button>
-                  )}
-                </div>
-              )}
-              {!sidebarCollapsed && roomsExpanded && (
-                <div className={groupStyles.roomsSidebarList}>
-                  {groupRooms.map((room) => (
-                    <div
-                      key={room.id}
-                      className={`${groupStyles.roomItem} ${selectedRoom?.id === room.id ? groupStyles.active : ""}`}
-                      onClick={() => handleSelectRoom(room)}
-                    >
-                      <div className={groupStyles.roomItemIcon}>
-                        {getInitials(room.name)}
-                      </div>
-                      <div className={groupStyles.roomItemInfo}>
-                        <div className={groupStyles.roomItemName}>
-                          {room.name}
-                        </div>
-                        <div className={groupStyles.roomItemMembers}>
-                          {room.memberCount || room.members?.length || 0}{" "}
-                          members
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+
 
         {sidebarCollapsed ? (
           <>
@@ -1223,32 +1171,133 @@ export default function ChatPage() {
         )}
 
         <div className={styles.conversationList}>
-          {/* Groups Section */}
+          {/* Groups Section with nested Rooms */}
           {!sidebarCollapsed && groups.length > 0 && (
             <>
               <div className={groupStyles.sectionLabel}>Groups</div>
-              {groups.map((group) => (
-                <div
-                  key={`group-${group.id}`}
-                  className={`${groupStyles.groupItem} ${selectedGroup?.id === group.id ? groupStyles.active : ""}`}
-                  onClick={() => handleSelectGroup(group)}
-                >
-                  <div className={groupStyles.groupAvatar}>
-                    {getInitials(group.name)}
-                  </div>
-                  <div className={groupStyles.groupItemInfo}>
-                    <div className={groupStyles.groupItemName}>
-                      {group.name}
+              {groups.map((group) => {
+                const groupRoomsForThisGroup = groupRooms.filter(
+                  (room) => room.groupId === group.id
+                );
+                const isExpanded = expandedGroups.has(group.id);
+                const hasRooms = groupRoomsForThisGroup.length > 0;
+
+                return (
+                  <div key={`group-${group.id}`}>
+                    <div
+                      className={`${groupStyles.groupItem} ${selectedGroup?.id === group.id && chatType === "group" ? groupStyles.active : ""}`}
+                      onClick={() => handleSelectGroup(group)}
+                    >
+                      <div className={groupStyles.groupAvatar}>
+                        {getInitials(group.name)}
+                      </div>
+                      <div className={groupStyles.groupItemInfo}>
+                        <div className={groupStyles.groupItemName}>
+                          {group.name}
+                          {hasRooms && (
+                            <span className={groupStyles.roomCount}>
+                              {groupRoomsForThisGroup.length}
+                            </span>
+                          )}
+                        </div>
+                        {group.lastMessage && (
+                          <div className={groupStyles.groupLastMessage}>
+                            {group.lastMessage.sender?.username}:{" "}
+                            {group.lastMessage.content}
+                          </div>
+                        )}
+                      </div>
+                      {hasRooms && (
+                        <button
+                          className={groupStyles.expandButton}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedGroups((prev) => {
+                              const newSet = new Set(prev);
+                              if (newSet.has(group.id)) {
+                                newSet.delete(group.id);
+                              } else {
+                                newSet.add(group.id);
+                              }
+                              return newSet;
+                            });
+                          }}
+                          title={isExpanded ? "Collapse rooms" : "Expand rooms"}
+                        >
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            style={{
+                              transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                              transition: "transform 0.2s ease",
+                            }}
+                          >
+                            <path d="M9 18l6-6-6-6" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
-                    {group.lastMessage && (
-                      <div className={groupStyles.groupLastMessage}>
-                        {group.lastMessage.sender?.username}:{" "}
-                        {group.lastMessage.content}
+
+                    {/* Nested Rooms */}
+                    {hasRooms && isExpanded && (
+                      <div className={groupStyles.nestedRooms}>
+                        {groupRoomsForThisGroup.map((room) => (
+                          <div
+                            key={`room-${room.id}`}
+                            className={`${groupStyles.roomItem} ${selectedRoom?.id === room.id ? groupStyles.active : ""}`}
+                            onClick={() => handleSelectRoom(room)}
+                          >
+                            <div className={groupStyles.roomItemIcon}>
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                              >
+                                <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
+                              </svg>
+                            </div>
+                            <div className={groupStyles.roomItemInfo}>
+                              <div className={groupStyles.roomItemName}>
+                                {room.name}
+                              </div>
+                              <div className={groupStyles.roomItemMembers}>
+                                {room.memberCount || room.members?.length || 0} members
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {group.myRole === "admin" && (
+                          <button
+                            className={groupStyles.createRoomButton}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectGroup(group);
+                              handleCreateRoom();
+                            }}
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                            >
+                              <path d="M12 5v14M5 12h14" />
+                            </svg>
+                            Create Room
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </>
           )}
 
@@ -1793,30 +1842,38 @@ export default function ChatPage() {
                       const isInCall = activeCall.participants.some(
                         (p) => p.id === member.id,
                       );
+                      const isBusy = busyUserIds.includes(member.id);
+                      const isDisabled = isInCall || isBusy;
 
                       return (
                         <div
                           key={member.id}
                           onClick={() =>
-                            !isInCall && handleInviteUser(member.id)
+                            !isDisabled && handleInviteUser(member.id)
                           }
                           className={groupStyles.memberItem}
                           style={{
                             padding: "0.75rem 1rem",
-                            background: isInCall ? "#e7f5ff" : "#f8f9fa",
+                            background: isInCall 
+                              ? "#e7f5ff" 
+                              : isBusy 
+                              ? "#fff3cd" 
+                              : "#f8f9fa",
                             borderRadius: "12px",
-                            cursor: isInCall ? "default" : "pointer",
+                            cursor: isDisabled ? "default" : "pointer",
                             display: "flex",
                             alignItems: "center",
                             gap: "1rem",
                             transition: "all 0.2s ease",
                             border: isInCall
                               ? "1px solid #4dabf7"
+                              : isBusy
+                              ? "1px solid #ffc107"
                               : "1px solid #e9ecef",
-                            opacity: isInCall ? 0.8 : 1,
+                            opacity: isDisabled ? 0.8 : 1,
                           }}
                           onMouseEnter={(e) => {
-                            if (!isInCall) {
+                            if (!isDisabled) {
                               e.currentTarget.style.background = "#e7f5ff";
                               e.currentTarget.style.borderColor = "#4dabf7";
                               e.currentTarget.style.transform =
@@ -1824,7 +1881,7 @@ export default function ChatPage() {
                             }
                           }}
                           onMouseLeave={(e) => {
-                            if (!isInCall) {
+                            if (!isDisabled) {
                               e.currentTarget.style.background = "#f8f9fa";
                               e.currentTarget.style.borderColor = "#e9ecef";
                               e.currentTarget.style.transform = "translateX(0)";
@@ -1894,6 +1951,28 @@ export default function ChatPage() {
                                 <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
                               </svg>
                               In Call
+                            </div>
+                          ) : isBusy ? (
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0.5rem",
+                                color: "#f59e0b",
+                                fontSize: "0.85rem",
+                                fontWeight: "500",
+                                flexShrink: 0,
+                              }}
+                            >
+                              <svg
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                              >
+                                <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/>
+                              </svg>
+                              Busy
                             </div>
                           ) : (
                             <div

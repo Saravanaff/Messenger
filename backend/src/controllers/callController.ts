@@ -4,7 +4,7 @@ import { Conversation } from "../models/Conversation";
 import { Group } from "../models/Group";
 import { Room } from "../models/Room";
 import { User } from "../models/User";
-import { isCallTimedOut } from "../services/socket/index";
+import { isCallTimedOut, getUsersInCall } from "../services/socket/index";
 
 interface AuthRequest extends Request {
   user?: {
@@ -191,5 +191,25 @@ export const joinCall = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error("Error joining call:", error);
     res.status(500).json({ error: "Failed to join call" });
+  }
+};
+
+/**
+ * Check which users are currently in calls
+ */
+export const checkUsersBusy = async (req: AuthRequest, res: Response) => {
+  try {
+    const { userIds } = req.body; // Array of user IDs to check
+    
+    if (!Array.isArray(userIds)) {
+      return res.status(400).json({ error: "userIds must be an array" });
+    }
+
+    const busyUserIds = getUsersInCall(userIds);
+    
+    res.json({ busyUserIds });
+  } catch (error) {
+    console.error("Error checking users busy status:", error);
+    res.status(500).json({ error: "Failed to check user status" });
   }
 };

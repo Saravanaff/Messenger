@@ -8,6 +8,8 @@ let io: Server;
 const callTimeouts = new Map<string, NodeJS.Timeout>();
 // Track calls that have timed out to prevent joining
 const timedOutCalls = new Set<string>();
+// Track users currently in active calls (userId -> roomName)
+const usersInCall = new Map<number, string>();
 
 export const initializeSocket = (server: HTTPServer): Server => {
   io = new Server(server, {
@@ -130,7 +132,7 @@ export const initializeSocket = (server: HTTPServer): Server => {
     // Call events - Enhanced ringing flow
     socket.on(
       "call:initiate",
-      (data: {
+      async (data: {
         type: string;
         targetId: number;
         roomName: string;
@@ -138,21 +140,82 @@ export const initializeSocket = (server: HTTPServer): Server => {
       }) => {
         console.log(`User ${userId} initiating call in ${data.roomName}`);
 
-        // Notify all participants except the initiator with ringing state
+        // Mark initiator as in call
+        usersInCall.set(userId, data.roomName);
+
+        // For conversation calls (1-on-1), check if the other user is busy
+        if (data.type === "conversation") {
+          const otherUserId = data.participants.find((id) => id !== userId);
+          if (otherUserId && usersInCall.has(otherUserId)) {
+            // User is busy, notify caller
+            io.to(`user:${userId}`).emit("call:user_busy", {
+              roomName: data.roomName,
+              userId: otherUserId,
+            });
+            // Remove caller from active calls since call won't happen
+            usersInCall.delete(userId);
+            return;
+          }
+        }
+
+        // For group/room calls, filter out busy users and send them missed call notifications
+        const busyUsers: number[] = [];
+        const availableParticipants: number[] = [];
+
         data.participants.forEach((participantId) => {
           if (participantId !== userId) {
-            io.to(`user:${participantId}`).emit("call:incoming", {
-              roomName: data.roomName,
-              type: data.type,
-              targetId: data.targetId,
-              initiator: {
-                id: userId,
-                username: socket.data.user.username,
-              },
-              state: "ringing",
-            });
+            if (usersInCall.has(participantId)) {
+              busyUsers.push(participantId);
+            } else {
+              availableParticipants.push(participantId);
+            }
           }
         });
+
+        // Send missed call messages to busy users for group/room calls
+        if ((data.type === "group" || data.type === "room") && busyUsers.length > 0) {
+          const { Message } = await import("../../models");
+          for (const busyUserId of busyUsers) {
+            try {
+              await Message.create({
+                [data.type === "group" ? "groupId" : "roomId"]: data.targetId,
+                senderId: userId,
+                content: `Missed call from ${socket.data.user.username}`,
+                status: "sent",
+              });
+              
+              // Notify the busy user about the missed call
+              io.to(`user:${busyUserId}`).emit(data.type === "group" ? "new_group_message" : "new_room_message", {
+                [data.type === "group" ? "groupId" : "roomId"]: data.targetId,
+                senderId: userId,
+                content: `Missed call from ${socket.data.user.username}`,
+                sender: { username: socket.data.user.username },
+              });
+            } catch (error) {
+              console.error(`Error creating missed call message for user ${busyUserId}:`, error);
+            }
+          }
+        }
+
+        // Notify available participants with ringing state
+        availableParticipants.forEach((participantId) => {
+          io.to(`user:${participantId}`).emit("call:incoming", {
+            roomName: data.roomName,
+            type: data.type,
+            targetId: data.targetId,
+            initiator: {
+              id: userId,
+              username: socket.data.user.username,
+            },
+            state: "ringing",
+          });
+        });
+
+        // For conversation calls, if no available participants, the call won't proceed
+        if (data.type === "conversation" && availableParticipants.length === 0) {
+          usersInCall.delete(userId);
+          return;
+        }
 
         // Set timeout for call (30 seconds)
         const timeoutId = setTimeout(() => {
@@ -169,6 +232,8 @@ export const initializeSocket = (server: HTTPServer): Server => {
           });
           // Clean up timeout reference
           callTimeouts.delete(data.roomName);
+          // Remove initiator from active calls on timeout
+          usersInCall.delete(userId);
 
           // Auto-cleanup timed out call after 5 seconds
           setTimeout(() => {
@@ -201,6 +266,9 @@ export const initializeSocket = (server: HTTPServer): Server => {
           });
           return;
         }
+
+        // Mark user as in call
+        usersInCall.set(userId, data.roomName);
 
         // Cancel the timeout since call was accepted
         const timeoutId = callTimeouts.get(data.roomName);
@@ -258,8 +326,9 @@ export const initializeSocket = (server: HTTPServer): Server => {
           callTimeouts.delete(data.roomName);
         }
 
-        // Notify all participants
+        // Remove all participants from active calls
         data.participants.forEach((participantId) => {
+          usersInCall.delete(participantId);
           io.to(`user:${participantId}`).emit("call:ended", {
             roomName: data.roomName,
             endedBy: userId,
@@ -272,6 +341,10 @@ export const initializeSocket = (server: HTTPServer): Server => {
       "call:participant_left",
       (data: { roomName: string; participants: number[] }) => {
         console.log(`User ${userId} left call ${data.roomName}`);
+        
+        // Remove user from active calls
+        usersInCall.delete(userId);
+        
         // Notify remaining participants
         data.participants.forEach((participantId) => {
           if (participantId !== userId) {
@@ -322,4 +395,12 @@ export const getIO = (): Server => {
 
 export const isCallTimedOut = (roomName: string): boolean => {
   return timedOutCalls.has(roomName);
+};
+
+export const isUserInCall = (userId: number): boolean => {
+  return usersInCall.has(userId);
+};
+
+export const getUsersInCall = (userIds: number[]): number[] => {
+  return userIds.filter((id) => usersInCall.has(id));
 };
