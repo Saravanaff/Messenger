@@ -22,4 +22,5 @@ export interface ActiveCall {
   targetId: number;
   participants: CallParticipant[];
   groupMembers?: { id: number; username: string; email?: string }[];
+  isInitiator: boolean;
 }

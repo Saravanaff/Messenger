@@ -279,8 +279,21 @@ export default function ChatPage() {
         if (activeCall.type === "conversation") {
           setIsRinging(false);
         } else {
-          // Group call - someone joined, could show a toast notification here
+          // Group call - someone joined, update participants list
           console.log(`${username} joined the group call`);
+          setActiveCall((prev) => {
+            if (!prev) return prev;
+            // Add the user to participants if not already there
+            const isAlreadyInList = prev.participants.some(
+              (p) => p.id === userId,
+            );
+            if (isAlreadyInList) return prev;
+
+            return {
+              ...prev,
+              participants: [...prev.participants, { id: userId, username }],
+            };
+          });
         }
       }
     });
@@ -302,28 +315,26 @@ export default function ChatPage() {
     });
 
     socket.on("call:ended", ({ roomName, endedBy }) => {
-      console.log(`Call ended by user ${endedBy}`);
+      console.log(`Call ended by user ${endedBy}`, {
+        roomName,
+        hasActiveCall: !!activeCall,
+        activeCallRoom: activeCall?.roomName,
+        hasIncomingCall: !!incomingCall,
+        incomingCallRoom: incomingCall?.roomName,
+      });
+
       if (activeCall && activeCall.roomName === roomName) {
         setActiveCall(null);
       }
-    });
-
-    socket.on("call:timeout", ({ roomName, reason }) => {
-      console.log(`Call timed out: ${roomName} - ${reason}`);
-
-      // Clear ringing state
-      setIsRinging(false);
-
-      // Clear active call if initiator
-      if (activeCall && activeCall.roomName === roomName) {
-        setActiveCall(null);
-        alert("Call ended: User did not accept the call");
-      }
-
-      // Clear incoming call if recipient
-      if (incomingCall && incomingCall.roomName === roomName) {
-        setIncomingCall(null);
-      }
+      // If receiver has an incoming call from this room, clear it
+      // Use functional update to access current state
+      setIncomingCall((currentIncomingCall) => {
+        if (currentIncomingCall && currentIncomingCall.roomName === roomName) {
+          console.log("Clearing incoming call due to call:ended");
+          return null;
+        }
+        return currentIncomingCall;
+      });
     });
 
     socket.on(
@@ -826,6 +837,7 @@ export default function ChatPage() {
         participants: participants.map((id) => ({ id, username: "User" })),
         groupMembers:
           type === "group" && selectedGroup ? selectedGroup.members : undefined,
+        isInitiator: true,
       });
 
       // Notify other participants
@@ -867,6 +879,7 @@ export default function ChatPage() {
         targetId: incomingCall.targetId,
         participants: [incomingCall.initiator],
         groupMembers,
+        isInitiator: false,
       });
 
       // Notify initiator that we accepted
@@ -908,12 +921,23 @@ export default function ChatPage() {
   const handleLeaveCall = () => {
     if (!activeCall || !socket || !user) return;
 
-    // For group and room calls, just leave - don't end for everyone
+    // For group/room calls:
+    // - If we're the initiator, ending the call should end it for everyone
+    // - If we're a participant who joined, we should just leave
     if (activeCall.type === "group" || activeCall.type === "room") {
-      socket.emit("call:participant_left", {
-        roomName: activeCall.roomName,
-        participants: activeCall.participants.map((p) => p.id),
-      });
+      if (activeCall.isInitiator) {
+        // Initiator ending the call - end for everyone
+        socket.emit("call:end", {
+          roomName: activeCall.roomName,
+          participants: activeCall.participants.map((p) => p.id),
+        });
+      } else {
+        // Participant leaving - just leave
+        socket.emit("call:participant_left", {
+          roomName: activeCall.roomName,
+          participants: activeCall.participants.map((p) => p.id),
+        });
+      }
     }
 
     // Clear the call state locally
@@ -936,12 +960,6 @@ export default function ChatPage() {
   };
 
   const handleInviteToCall = () => {
-    console.log("Opening invite modal", {
-      showInviteModal,
-      activeCall: activeCall?.type,
-      selectedGroup: selectedGroup?.name,
-      groupMembers: selectedGroup?.members?.length,
-    });
     setShowInviteModal(true);
   };
 
@@ -1725,7 +1743,7 @@ export default function ChatPage() {
             className={groupStyles.modalOverlay}
             onClick={() => setShowInviteModal(false)}
             style={{
-              zIndex: 3000, // Higher than CallModal's 2000
+              zIndex: 3000,
             }}
           >
             <div
@@ -1734,11 +1752,14 @@ export default function ChatPage() {
               style={{
                 maxWidth: "500px",
                 maxHeight: "80vh",
-                overflow: "auto",
+                display: "flex",
+                flexDirection: "column",
               }}
             >
               <div className={groupStyles.modalHeader}>
-                <h2>Invite to Call</h2>
+                <h2 style={{ margin: 0, fontSize: "1.25rem" }}>
+                  Invite to Call
+                </h2>
                 <button
                   className={groupStyles.closeButton}
                   onClick={() => setShowInviteModal(false)}
@@ -1746,82 +1767,172 @@ export default function ChatPage() {
                   ×
                 </button>
               </div>
-              <div className={groupStyles.modalContent}>
-                <p style={{ marginBottom: "1rem", color: "#666" }}>
-                  Select a member to invite to the call
+              <div
+                className={groupStyles.modalBody}
+                style={{ padding: "1.5rem" }}
+              >
+                <p
+                  style={{
+                    marginBottom: "1rem",
+                    color: "#666",
+                    fontSize: "0.9rem",
+                  }}
+                >
+                  Select members to invite to the call
                 </p>
                 <div
                   style={{
                     display: "flex",
                     flexDirection: "column",
-                    gap: "0.5rem",
+                    gap: "0.75rem",
                   }}
                 >
                   {(activeCall.groupMembers || selectedGroup?.members)
-                    ?.filter(
-                      (member) =>
-                        member.id !== user.id &&
-                        !activeCall.participants.some(
-                          (p) => p.id === member.id,
-                        ),
-                    )
-                    .map((member) => (
-                      <div
-                        key={member.id}
-                        onClick={() => handleInviteUser(member.id)}
-                        style={{
-                          padding: "1rem",
-                          background: "#f5f5f5",
-                          borderRadius: "8px",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "1rem",
-                          transition: "background 0.2s",
-                        }}
-                        onMouseEnter={(e) =>
-                          (e.currentTarget.style.background = "#e0e0e0")
-                        }
-                        onMouseLeave={(e) =>
-                          (e.currentTarget.style.background = "#f5f5f5")
-                        }
-                      >
+                    ?.filter((member) => member.id !== user.id)
+                    .map((member) => {
+                      const isInCall = activeCall.participants.some(
+                        (p) => p.id === member.id,
+                      );
+
+                      return (
                         <div
+                          key={member.id}
+                          onClick={() =>
+                            !isInCall && handleInviteUser(member.id)
+                          }
+                          className={groupStyles.memberItem}
                           style={{
-                            width: "40px",
-                            height: "40px",
-                            borderRadius: "50%",
-                            background: getAvatarColor(member.username),
+                            padding: "0.75rem 1rem",
+                            background: isInCall ? "#e7f5ff" : "#f8f9fa",
+                            borderRadius: "12px",
+                            cursor: isInCall ? "default" : "pointer",
                             display: "flex",
                             alignItems: "center",
-                            justifyContent: "center",
-                            color: "white",
-                            fontWeight: "bold",
+                            gap: "1rem",
+                            transition: "all 0.2s ease",
+                            border: isInCall
+                              ? "1px solid #4dabf7"
+                              : "1px solid #e9ecef",
+                            opacity: isInCall ? 0.8 : 1,
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isInCall) {
+                              e.currentTarget.style.background = "#e7f5ff";
+                              e.currentTarget.style.borderColor = "#4dabf7";
+                              e.currentTarget.style.transform =
+                                "translateX(4px)";
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isInCall) {
+                              e.currentTarget.style.background = "#f8f9fa";
+                              e.currentTarget.style.borderColor = "#e9ecef";
+                              e.currentTarget.style.transform = "translateX(0)";
+                            }
                           }}
                         >
-                          {getInitials(member.username)}
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: "500" }}>
-                            {member.username}
+                          <div
+                            style={{
+                              width: "44px",
+                              height: "44px",
+                              borderRadius: "50%",
+                              background: getAvatarColor(member.username),
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              color: "white",
+                              fontWeight: "600",
+                              fontSize: "1rem",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {getInitials(member.username)}
                           </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div
+                              style={{
+                                fontWeight: "500",
+                                fontSize: "1rem",
+                                color: "#212529",
+                                marginBottom: "2px",
+                              }}
+                            >
+                              {member.username}
+                            </div>
+                            {member.email && (
+                              <div
+                                style={{
+                                  fontSize: "0.85rem",
+                                  color: "#868e96",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {member.email}
+                              </div>
+                            )}
+                          </div>
+                          {isInCall ? (
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0.5rem",
+                                color: "#4dabf7",
+                                fontSize: "0.85rem",
+                                fontWeight: "500",
+                                flexShrink: 0,
+                              }}
+                            >
+                              <svg
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                              >
+                                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                              </svg>
+                              In Call
+                            </div>
+                          ) : (
+                            <div
+                              style={{
+                                width: "32px",
+                                height: "32px",
+                                borderRadius: "50%",
+                                background: "#4dabf7",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                color: "white",
+                                fontSize: "1.2rem",
+                                flexShrink: 0,
+                              }}
+                            >
+                              +
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   {(activeCall.groupMembers || selectedGroup?.members)?.filter(
-                    (member) =>
-                      member.id !== user.id &&
-                      !activeCall.participants.some((p) => p.id === member.id),
+                    (member) => member.id !== user.id,
                   ).length === 0 && (
-                    <p
+                    <div
                       style={{
                         textAlign: "center",
-                        color: "#999",
-                        padding: "2rem",
+                        padding: "3rem 1rem",
+                        color: "#868e96",
                       }}
                     >
-                      All group members are already in the call
-                    </p>
+                      <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>
+                        👥
+                      </div>
+                      <p style={{ margin: 0, fontSize: "1rem" }}>
+                        No other members in this group
+                      </p>
+                    </div>
                   )}
                 </div>
               </div>
