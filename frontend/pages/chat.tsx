@@ -269,12 +269,11 @@ export default function ChatPage() {
       setIncomingCall(data);
     });
 
-    socket.on("call:accepted", ({ userId, username, roomName }) => {
+    socket.on("call:accepted", async ({ userId, username, roomName }) => {
       console.log(`Call accepted by ${username}`);
-      // Stop ringing when other party accepts
-      if (activeCall && activeCall.roomName === roomName) {
-        setIsRinging(false);
-      }
+
+      // Just clear ringing state - activeCall is already set from initiation
+      setIsRinging(false);
     });
 
     socket.on("call:rejected", ({ userId, username, roomName }) => {
@@ -290,20 +289,39 @@ export default function ChatPage() {
       }
     });
 
-    socket.on("call:timeout", ({ roomName }) => {
-      console.log(`Call timed out: ${roomName}`);
+    socket.on("call:timeout", ({ roomName, reason }) => {
+      console.log(`Call timed out: ${roomName} - ${reason}`);
+
+      // Clear ringing state
+      setIsRinging(false);
+
+      // Clear active call if initiator
       if (activeCall && activeCall.roomName === roomName) {
         setActiveCall(null);
-        setIsRinging(false);
+        alert("Call ended: User did not accept the call");
+      }
+
+      // Clear incoming call if recipient
+      if (incomingCall && incomingCall.roomName === roomName) {
+        setIncomingCall(null);
       }
     });
 
     socket.on(
       "call:participant_disconnected",
       ({ roomName, userId, username }) => {
-        console.log(`${username} disconnected from call`);
+        console.log(`${username} left the call`);
         if (activeCall && activeCall.roomName === roomName) {
-          // Could show notification or end call
+          // Update active call participants list to remove the disconnected user
+          setActiveCall((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              participants: prev.participants.filter((p) => p.id !== userId),
+            };
+          });
+          // Show notification that user left (optional - you could add a toast notification here)
+          console.log(`${username} has left the call`);
         }
       },
     );
@@ -775,7 +793,7 @@ export default function ChatPage() {
       const { roomName, token, url } = await callAPI.initiate(type, targetId);
       console.log("Call initiated successfully:", { roomName });
 
-      // Set ringing state instead of activeCall for initiator
+      // Set ringing state AND activeCall so the calling UI shows
       setIsRinging(true);
       setActiveCall({
         roomName,
@@ -822,11 +840,22 @@ export default function ChatPage() {
         targetId: incomingCall.targetId,
         userId: user.id,
         username: user.username,
+        initiatorId: incomingCall.initiator.id,
       });
 
       setIncomingCall(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error accepting call:", error);
+      // Check if call has ended/timed out
+      if (
+        error.response?.status === 410 ||
+        error.response?.data?.error?.includes("ended")
+      ) {
+        alert("Call has already ended");
+        setIncomingCall(null);
+      } else {
+        alert("Failed to join call. Please try again.");
+      }
     }
   };
 
@@ -841,9 +870,27 @@ export default function ChatPage() {
     setIncomingCall(null);
   };
 
+  const handleLeaveCall = () => {
+    if (!activeCall || !socket || !user) return;
+
+    // For group and room calls, just leave - don't end for everyone
+    if (activeCall.type === "group" || activeCall.type === "room") {
+      socket.emit("call:participant_left", {
+        roomName: activeCall.roomName,
+        participants: activeCall.participants.map((p) => p.id),
+      });
+    }
+
+    // Clear the call state locally
+    setActiveCall(null);
+    setIsRinging(false);
+  };
+
   const handleEndCall = () => {
     if (!activeCall || !socket) return;
 
+    // For conversation calls, end for both parties
+    // For group/room calls, this should only be called by the room creator or admin
     socket.emit("call:end", {
       roomName: activeCall.roomName,
       participants: activeCall.participants.map((p) => p.id),
@@ -1603,6 +1650,7 @@ export default function ChatPage() {
         <CallModal
           call={activeCall}
           onEnd={handleEndCall}
+          onLeave={handleLeaveCall}
           isRinging={isRinging}
         />
       )}

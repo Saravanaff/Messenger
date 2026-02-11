@@ -10,6 +10,10 @@ import {
   TrackToggle,
   DisconnectButton,
 } from "@livekit/components-react";
+// Provide a module declaration in types to avoid TS error when importing styles for side effects.
+// If TypeScript still complains, ensure the `frontend/types/livekit-styles.d.ts` file exists.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
 import "@livekit/components-styles/prefabs";
 import { Track } from "livekit-client";
 import styles from "../../styles/CallModal.module.css";
@@ -18,10 +22,19 @@ import { ActiveCall } from "@/types/call";
 interface CallModalProps {
   call: ActiveCall;
   onEnd: () => void;
+  onLeave?: () => void;
   isRinging?: boolean;
 }
 
-function CallInterface({ onEnd }: { onEnd: () => void }) {
+function CallInterface({
+  onEnd,
+  onLeave,
+  callType,
+}: {
+  onEnd: () => void;
+  onLeave?: () => void;
+  callType: "conversation" | "group" | "room";
+}) {
   const participants = useParticipants();
   const tracks = useTracks([Track.Source.Camera, Track.Source.Microphone]);
   const { localParticipant } = useLocalParticipant();
@@ -55,7 +68,11 @@ function CallInterface({ onEnd }: { onEnd: () => void }) {
         ) : (
           <div className={styles.waitingMessage}>
             <div className={styles.waitingIcon}>📞</div>
-            <p>Waiting for others to join...</p>
+            <p>
+              {callType === "conversation"
+                ? "Waiting for the other person to join..."
+                : "Waiting for others to join..."}
+            </p>
           </div>
         )}
       </div>
@@ -77,41 +94,22 @@ function CallInterface({ onEnd }: { onEnd: () => void }) {
           <TrackToggle
             source={Track.Source.Microphone}
             className={styles.controlButton}
-          >
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-              <line x1="12" y1="19" x2="12" y2="23"></line>
-              <line x1="8" y1="23" x2="16" y2="23"></line>
-            </svg>
-          </TrackToggle>
+          />
 
           <TrackToggle
             source={Track.Source.Camera}
             className={styles.controlButton}
-          >
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M23 7l-7 5 7 5V7z"></path>
-              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
-            </svg>
-          </TrackToggle>
+          />
 
           <button
-            onClick={onEnd}
+            onClick={() => {
+              // For group and room calls, just leave. For conversations, end for both
+              if (callType === "group" || callType === "room") {
+                onLeave ? onLeave() : onEnd();
+              } else {
+                onEnd();
+              }
+            }}
             className={`${styles.controlButton} ${styles.endCallButton}`}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
@@ -129,6 +127,7 @@ function CallInterface({ onEnd }: { onEnd: () => void }) {
 export default function CallModal({
   call,
   onEnd,
+  onLeave,
   isRinging = false,
 }: CallModalProps) {
   const [isConnected, setIsConnected] = useState(false);
@@ -247,7 +246,7 @@ export default function CallModal({
               </p>
             </div>
           ) : isConnected ? (
-            <CallInterface onEnd={handleDisconnect} />
+            <CallInterface onEnd={handleDisconnect} onLeave={onLeave} callType={call.type} />
           ) : (
             <div className={styles.connecting}>
               <div className={styles.spinner}></div>
