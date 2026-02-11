@@ -84,6 +84,7 @@ export default function ChatPage() {
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [isRinging, setIsRinging] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
 
   // Typing indicator state
   const [typingUsers, setTypingUsers] = useState<{ [key: string]: string }>({}); // key: userId, value: username
@@ -272,14 +273,32 @@ export default function ChatPage() {
     socket.on("call:accepted", async ({ userId, username, roomName }) => {
       console.log(`Call accepted by ${username}`);
 
-      // Just clear ringing state - activeCall is already set from initiation
-      setIsRinging(false);
+      // For 1-on-1 calls: clear ringing state
+      // For group calls: just log that someone joined (they'll appear in the video grid)
+      if (activeCall && activeCall.roomName === roomName) {
+        if (activeCall.type === "conversation") {
+          setIsRinging(false);
+        } else {
+          // Group call - someone joined, could show a toast notification here
+          console.log(`${username} joined the group call`);
+        }
+      }
     });
 
     socket.on("call:rejected", ({ userId, username, roomName }) => {
       console.log(`Call rejected by ${username}`);
-      setIsRinging(false);
-      setActiveCall(null);
+
+      // Only end the call if this is a 1-on-1 conversation
+      // For group calls, one person rejecting doesn't affect others
+      if (
+        activeCall &&
+        activeCall.roomName === roomName &&
+        activeCall.type === "conversation"
+      ) {
+        setIsRinging(false);
+        setActiveCall(null);
+        alert(`${username} rejected your call`);
+      }
     });
 
     socket.on("call:ended", ({ roomName, endedBy }) => {
@@ -793,8 +812,11 @@ export default function ChatPage() {
       const { roomName, token, url } = await callAPI.initiate(type, targetId);
       console.log("Call initiated successfully:", { roomName });
 
-      // Set ringing state AND activeCall so the calling UI shows
-      setIsRinging(true);
+      // For group/room calls: Join immediately (no ringing)
+      // For conversation calls: Set ringing state and wait for acceptance
+      const shouldRing = type === "conversation";
+      setIsRinging(shouldRing);
+
       setActiveCall({
         roomName,
         token,
@@ -802,6 +824,8 @@ export default function ChatPage() {
         type,
         targetId,
         participants: participants.map((id) => ({ id, username: "User" })),
+        groupMembers:
+          type === "group" && selectedGroup ? selectedGroup.members : undefined,
       });
 
       // Notify other participants
@@ -825,6 +849,16 @@ export default function ChatPage() {
     try {
       const { token, url } = await callAPI.join(incomingCall.roomName);
 
+      // Get group members if this is a group call
+      let groupMembers = undefined;
+      if (
+        incomingCall.type === "group" &&
+        selectedGroup &&
+        selectedGroup.id === incomingCall.targetId
+      ) {
+        groupMembers = selectedGroup.members;
+      }
+
       setActiveCall({
         roomName: incomingCall.roomName,
         token,
@@ -832,6 +866,7 @@ export default function ChatPage() {
         type: incomingCall.type,
         targetId: incomingCall.targetId,
         participants: [incomingCall.initiator],
+        groupMembers,
       });
 
       // Notify initiator that we accepted
@@ -898,6 +933,30 @@ export default function ChatPage() {
 
     setActiveCall(null);
     setIsRinging(false);
+  };
+
+  const handleInviteToCall = () => {
+    console.log("Opening invite modal", {
+      showInviteModal,
+      activeCall: activeCall?.type,
+      selectedGroup: selectedGroup?.name,
+      groupMembers: selectedGroup?.members?.length,
+    });
+    setShowInviteModal(true);
+  };
+
+  const handleInviteUser = (userId: number) => {
+    if (!activeCall || !socket || !selectedGroup) return;
+
+    // Send notification to the specific user
+    socket.emit("call:initiate", {
+      type: "group",
+      targetId: activeCall.targetId,
+      roomName: activeCall.roomName,
+      participants: [userId], // Only invite this specific user
+    });
+
+    setShowInviteModal(false);
   };
 
   if (loading || !user) {
@@ -1651,9 +1710,124 @@ export default function ChatPage() {
           call={activeCall}
           onEnd={handleEndCall}
           onLeave={handleLeaveCall}
+          onInviteParticipants={
+            activeCall.type === "group" ? handleInviteToCall : undefined
+          }
           isRinging={isRinging}
         />
       )}
+
+      {/* Invite to Call Modal */}
+      {showInviteModal &&
+        activeCall &&
+        (activeCall.groupMembers || selectedGroup) && (
+          <div
+            className={groupStyles.modalOverlay}
+            onClick={() => setShowInviteModal(false)}
+            style={{
+              zIndex: 3000, // Higher than CallModal's 2000
+            }}
+          >
+            <div
+              className={groupStyles.modal}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: "500px",
+                maxHeight: "80vh",
+                overflow: "auto",
+              }}
+            >
+              <div className={groupStyles.modalHeader}>
+                <h2>Invite to Call</h2>
+                <button
+                  className={groupStyles.closeButton}
+                  onClick={() => setShowInviteModal(false)}
+                >
+                  ×
+                </button>
+              </div>
+              <div className={groupStyles.modalContent}>
+                <p style={{ marginBottom: "1rem", color: "#666" }}>
+                  Select a member to invite to the call
+                </p>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.5rem",
+                  }}
+                >
+                  {(activeCall.groupMembers || selectedGroup?.members)
+                    ?.filter(
+                      (member) =>
+                        member.id !== user.id &&
+                        !activeCall.participants.some(
+                          (p) => p.id === member.id,
+                        ),
+                    )
+                    .map((member) => (
+                      <div
+                        key={member.id}
+                        onClick={() => handleInviteUser(member.id)}
+                        style={{
+                          padding: "1rem",
+                          background: "#f5f5f5",
+                          borderRadius: "8px",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "1rem",
+                          transition: "background 0.2s",
+                        }}
+                        onMouseEnter={(e) =>
+                          (e.currentTarget.style.background = "#e0e0e0")
+                        }
+                        onMouseLeave={(e) =>
+                          (e.currentTarget.style.background = "#f5f5f5")
+                        }
+                      >
+                        <div
+                          style={{
+                            width: "40px",
+                            height: "40px",
+                            borderRadius: "50%",
+                            background: getAvatarColor(member.username),
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "white",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          {getInitials(member.username)}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: "500" }}>
+                            {member.username}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  {(activeCall.groupMembers || selectedGroup?.members)?.filter(
+                    (member) =>
+                      member.id !== user.id &&
+                      !activeCall.participants.some((p) => p.id === member.id),
+                  ).length === 0 && (
+                    <p
+                      style={{
+                        textAlign: "center",
+                        color: "#999",
+                        padding: "2rem",
+                      }}
+                    >
+                      All group members are already in the call
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
     </div>
   );
 }

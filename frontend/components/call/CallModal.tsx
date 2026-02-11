@@ -23,21 +23,26 @@ interface CallModalProps {
   call: ActiveCall;
   onEnd: () => void;
   onLeave?: () => void;
+  onInviteParticipants?: () => void;
   isRinging?: boolean;
 }
 
 function CallInterface({
   onEnd,
   onLeave,
+  onInviteParticipants,
   callType,
 }: {
   onEnd: () => void;
   onLeave?: () => void;
+  onInviteParticipants?: () => void;
   callType: "conversation" | "group" | "room";
 }) {
   const participants = useParticipants();
   const tracks = useTracks([Track.Source.Camera, Track.Source.Microphone]);
   const { localParticipant } = useLocalParticipant();
+
+  console.log('CallInterface render:', { callType, hasInviteCallback: !!onInviteParticipants });
 
   const videoTracks = tracks.filter(
     (track) => track.source === Track.Source.Camera,
@@ -66,19 +71,29 @@ function CallInterface({
             </div>
           ))
         ) : (
-          <div className={styles.waitingMessage}>
-            <div className={styles.waitingIcon}>📞</div>
-            <p>
-              {callType === "conversation"
-                ? "Waiting for the other person to join..."
-                : "Waiting for others to join..."}
-            </p>
-          </div>
+          // Show local video in main area when alone in group/room calls
+          (callType === "group" || callType === "room") && localVideoTrack ? (
+            <div className={styles.videoContainer}>
+              <VideoTrack trackRef={localVideoTrack} className={styles.videoElement} />
+              <div className={styles.participantName}>
+                You (Alone in call)
+              </div>
+            </div>
+          ) : (
+            <div className={styles.waitingMessage}>
+              <div className={styles.waitingIcon}>📞</div>
+              <p>
+                {callType === "conversation"
+                  ? "Waiting for the other person to join..."
+                  : "Waiting for others to join..."}
+              </p>
+            </div>
+          )
         )}
       </div>
 
-      {/* Local video (picture-in-picture) */}
-      {localVideoTrack && (
+      {/* Local video (picture-in-picture) - only show when there are remote participants */}
+      {localVideoTrack && remoteVideoTracks.length > 0 && (
         <div className={styles.localVideo}>
           <VideoTrack
             trackRef={localVideoTrack}
@@ -100,6 +115,22 @@ function CallInterface({
             source={Track.Source.Camera}
             className={styles.controlButton}
           />
+
+          {/* Add participants button for group calls */}
+          {callType === "group" && onInviteParticipants && (
+            <button
+              onClick={() => {
+                console.log('Invite button clicked in CallModal');
+                onInviteParticipants();
+              }}
+              className={styles.controlButton}
+              title="Invite participants"
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+              </svg>
+            </button>
+          )}
 
           <button
             onClick={() => {
@@ -128,6 +159,7 @@ export default function CallModal({
   call,
   onEnd,
   onLeave,
+  onInviteParticipants,
   isRinging = false,
 }: CallModalProps) {
   const [isConnected, setIsConnected] = useState(false);
@@ -246,7 +278,12 @@ export default function CallModal({
               </p>
             </div>
           ) : isConnected ? (
-            <CallInterface onEnd={handleDisconnect} onLeave={onLeave} callType={call.type} />
+            <CallInterface 
+              onEnd={handleDisconnect} 
+              onLeave={onLeave} 
+              onInviteParticipants={onInviteParticipants}
+              callType={call.type} 
+            />
           ) : (
             <div className={styles.connecting}>
               <div className={styles.spinner}></div>
