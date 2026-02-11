@@ -39,13 +39,21 @@ function CallInterface({
   callType: "conversation" | "group" | "room";
 }) {
   const participants = useParticipants();
-  const tracks = useTracks([Track.Source.Camera, Track.Source.Microphone]);
+  const tracks = useTracks([
+    Track.Source.Camera,
+    Track.Source.Microphone,
+    Track.Source.ScreenShare,
+  ]);
   const { localParticipant } = useLocalParticipant();
+  const [isSharingScreen, setIsSharingScreen] = useState(false);
 
   console.log('CallInterface render:', { callType, hasInviteCallback: !!onInviteParticipants });
 
   const videoTracks = tracks.filter(
     (track) => track.source === Track.Source.Camera,
+  );
+  const screenShareTracks = tracks.filter(
+    (track) => track.source === Track.Source.ScreenShare,
   );
   const remoteVideoTracks = videoTracks.filter(
     (track) => track.participant.identity !== localParticipant.identity,
@@ -58,7 +66,21 @@ function CallInterface({
     <div className={styles.callInterface}>
       {/* Main video area */}
       <div className={styles.videoGrid}>
-        {remoteVideoTracks.length > 0 ? (
+        {/* Show screen shares with highest priority */}
+        {screenShareTracks.length > 0 ? (
+          screenShareTracks.map((track) => (
+            <div
+              key={track.participant.identity + "-screen"}
+              className={styles.videoContainer}
+              style={{ gridColumn: '1 / -1', minHeight: '70vh' }}
+            >
+              <VideoTrack trackRef={track} className={styles.videoElement} />
+              <div className={styles.participantName}>
+                {track.participant.name || track.participant.identity} (Screen)
+              </div>
+            </div>
+          ))
+        ) : remoteVideoTracks.length > 0 ? (
           remoteVideoTracks.map((track) => (
             <div
               key={track.participant.identity}
@@ -92,8 +114,8 @@ function CallInterface({
         )}
       </div>
 
-      {/* Local video (picture-in-picture) - only show when there are remote participants */}
-      {localVideoTrack && remoteVideoTracks.length > 0 && (
+      {/* Local video (picture-in-picture) - only show when there are remote participants or screen shares */}
+      {localVideoTrack && (remoteVideoTracks.length > 0 || screenShareTracks.length > 0) && (
         <div className={styles.localVideo}>
           <VideoTrack
             trackRef={localVideoTrack}
@@ -115,6 +137,17 @@ function CallInterface({
             source={Track.Source.Camera}
             className={styles.controlButton}
           />
+
+          {/* Screen share toggle */}
+          <TrackToggle
+            source={Track.Source.ScreenShare}
+            className={styles.controlButton}
+            captureOptions={{ audio: true, selfBrowserSurface: "include" }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/>
+            </svg>
+          </TrackToggle>
 
           {/* Add participants button for group calls */}
           {callType === "group" && onInviteParticipants && (
