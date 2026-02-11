@@ -13,7 +13,7 @@ export const createGroup = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const { name, memberIds } = req.body;
+    const { name, memberIds, settings } = req.body;
     const currentUserId = req.user?.userId;
 
     if (!currentUserId) {
@@ -26,10 +26,16 @@ export const createGroup = async (
       return;
     }
 
-    // Create the group
+    // Create the group with settings
     const group = await Group.create({
       name: name.trim(),
       createdBy: currentUserId,
+      settings: settings || {
+        whoCanCreateRooms: "everyone",
+        whoCanSendMessages: "everyone",
+        whoCanAddMembers: "admin",
+        whoCanRemoveMembers: "admin",
+      },
     });
 
     // Add creator as admin
@@ -433,11 +439,9 @@ export const leaveGroup = async (
     // Check if user is the creator
     const group = await Group.findByPk(groupId);
     if (group && group.createdBy === currentUserId) {
-      res
-        .status(400)
-        .json({
-          error: "Creator cannot leave the group. Delete the group instead.",
-        });
+      res.status(400).json({
+        error: "Creator cannot leave the group. Delete the group instead.",
+      });
       return;
     }
 
@@ -561,6 +565,70 @@ export const getGroupMessages = async (
     res.json({ messages, groupId: parseInt(groupId) });
   } catch (error: any) {
     console.error("Get group messages error:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+// Update group settings
+export const updateGroupSettings = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { groupId } = req.params;
+    const { settings } = req.body;
+    const currentUserId = req.user?.userId;
+
+    if (!currentUserId) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    // Check if user is admin of the group
+    const membership = await GroupMember.findOne({
+      where: {
+        groupId: parseInt(groupId),
+        userId: currentUserId,
+        role: GroupRole.ADMIN,
+      },
+    });
+
+    if (!membership) {
+      res.status(403).json({ error: "Only admins can update group settings" });
+      return;
+    }
+
+    // Update group settings
+    const group = await Group.findByPk(parseInt(groupId));
+    if (!group) {
+      res.status(404).json({ error: "Group not found" });
+      return;
+    }
+
+    await group.update({ settings });
+
+    // Fetch updated group
+    const updatedGroup = await getGroupWithMembers(parseInt(groupId));
+
+    // Notify all group members about settings update
+    const io = getIO();
+    const allMembers = await GroupMember.findAll({
+      where: { groupId: parseInt(groupId) },
+    });
+
+    allMembers.forEach((member) => {
+      io.to(`user:${member.userId}`).emit("group_settings_updated", {
+        groupId: parseInt(groupId),
+        settings,
+      });
+    });
+
+    res.json({
+      group: { ...updatedGroup, myRole: membership.role },
+      message: "Settings updated successfully",
+    });
+  } catch (error: any) {
+    console.error("Update group settings error:", error);
     res.status(500).json({ error: "Server error" });
   }
 };

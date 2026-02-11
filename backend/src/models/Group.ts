@@ -38,6 +38,23 @@ export class Group extends Model {
   })
   createdBy!: number;
 
+  @Column({
+    type: DataType.JSON,
+    allowNull: false,
+    defaultValue: {
+      whoCanCreateRooms: "everyone",
+      whoCanSendMessages: "everyone",
+      whoCanAddMembers: "admin",
+      whoCanRemoveMembers: "admin",
+    },
+  })
+  settings!: {
+    whoCanCreateRooms: "admin" | "everyone";
+    whoCanSendMessages: "admin" | "everyone";
+    whoCanAddMembers: "admin" | "everyone";
+    whoCanRemoveMembers: "admin" | "everyone";
+  };
+
   @BelongsTo(() => User, "createdBy")
   creator!: User;
 

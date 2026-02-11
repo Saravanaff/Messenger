@@ -47,7 +47,10 @@ function CallInterface({
   const { localParticipant } = useLocalParticipant();
   const [isSharingScreen, setIsSharingScreen] = useState(false);
 
-  console.log('CallInterface render:', { callType, hasInviteCallback: !!onInviteParticipants });
+  console.log("CallInterface render:", {
+    callType,
+    hasInviteCallback: !!onInviteParticipants,
+  });
 
   const videoTracks = tracks.filter(
     (track) => track.source === Track.Source.Camera,
@@ -72,7 +75,7 @@ function CallInterface({
             <div
               key={track.participant.identity + "-screen"}
               className={styles.videoContainer}
-              style={{ gridColumn: '1 / -1', minHeight: '70vh' }}
+              style={{ gridColumn: "1 / -1", minHeight: "70vh" }}
             >
               <VideoTrack trackRef={track} className={styles.videoElement} />
               <div className={styles.participantName}>
@@ -92,38 +95,38 @@ function CallInterface({
               </div>
             </div>
           ))
+        ) : // Show local video in main area when alone in group/room calls
+        (callType === "group" || callType === "room") && localVideoTrack ? (
+          <div className={styles.videoContainer}>
+            <VideoTrack
+              trackRef={localVideoTrack}
+              className={styles.videoElement}
+            />
+            <div className={styles.participantName}>You (Alone in call)</div>
+          </div>
         ) : (
-          // Show local video in main area when alone in group/room calls
-          (callType === "group" || callType === "room") && localVideoTrack ? (
-            <div className={styles.videoContainer}>
-              <VideoTrack trackRef={localVideoTrack} className={styles.videoElement} />
-              <div className={styles.participantName}>
-                You (Alone in call)
-              </div>
-            </div>
-          ) : (
-            <div className={styles.waitingMessage}>
-              <div className={styles.waitingIcon}>📞</div>
-              <p>
-                {callType === "conversation"
-                  ? "Waiting for the other person to join..."
-                  : "Waiting for others to join..."}
-              </p>
-            </div>
-          )
+          <div className={styles.waitingMessage}>
+            <div className={styles.waitingIcon}>📞</div>
+            <p>
+              {callType === "conversation"
+                ? "Waiting for the other person to join..."
+                : "Waiting for others to join..."}
+            </p>
+          </div>
         )}
       </div>
 
       {/* Local video (picture-in-picture) - only show when there are remote participants or screen shares */}
-      {localVideoTrack && (remoteVideoTracks.length > 0 || screenShareTracks.length > 0) && (
-        <div className={styles.localVideo}>
-          <VideoTrack
-            trackRef={localVideoTrack}
-            className={styles.localVideoElement}
-          />
-          <div className={styles.localLabel}>You</div>
-        </div>
-      )}
+      {localVideoTrack &&
+        (remoteVideoTracks.length > 0 || screenShareTracks.length > 0) && (
+          <div className={styles.localVideo}>
+            <VideoTrack
+              trackRef={localVideoTrack}
+              className={styles.localVideoElement}
+            />
+            <div className={styles.localLabel}>You</div>
+          </div>
+        )}
 
       {/* Controls */}
       <div className={styles.controls}>
@@ -145,7 +148,7 @@ function CallInterface({
             captureOptions={{ audio: true, selfBrowserSurface: "include" }}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/>
+              <path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z" />
             </svg>
           </TrackToggle>
 
@@ -153,14 +156,19 @@ function CallInterface({
           {callType === "group" && onInviteParticipants && (
             <button
               onClick={() => {
-                console.log('Invite button clicked in CallModal');
+                console.log("Invite button clicked in CallModal");
                 onInviteParticipants();
               }}
               className={styles.controlButton}
               title="Invite participants"
             >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
               </svg>
             </button>
           )}
@@ -311,11 +319,11 @@ export default function CallModal({
               </p>
             </div>
           ) : isConnected ? (
-            <CallInterface 
-              onEnd={handleDisconnect} 
-              onLeave={onLeave} 
+            <CallInterface
+              onEnd={handleDisconnect}
+              onLeave={onLeave}
               onInviteParticipants={onInviteParticipants}
-              callType={call.type} 
+              callType={call.type}
             />
           ) : (
             <div className={styles.connecting}>

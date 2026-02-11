@@ -200,13 +200,13 @@ export const joinCall = async (req: AuthRequest, res: Response) => {
 export const checkUsersBusy = async (req: AuthRequest, res: Response) => {
   try {
     const { userIds } = req.body; // Array of user IDs to check
-    
+
     if (!Array.isArray(userIds)) {
       return res.status(400).json({ error: "userIds must be an array" });
     }
 
     const busyUserIds = getUsersInCall(userIds);
-    
+
     res.json({ busyUserIds });
   } catch (error) {
     console.error("Error checking users busy status:", error);

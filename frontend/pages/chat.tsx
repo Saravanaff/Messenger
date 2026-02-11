@@ -25,6 +25,7 @@ import groupStyles from "../styles/GroupChat.module.css";
 import callStyles from "../styles/CallModal.module.css";
 import CreateGroupModal from "@/components/groups/CreateGroupModal";
 import GroupInfoPanel from "@/components/groups/GroupInfoPanel";
+import GroupSettingsModal from "@/components/groups/GroupSettingsModal";
 import CreateRoomModal from "@/components/rooms/CreateRoomModal";
 import RoomInfoPanel from "@/components/rooms/RoomInfoPanel";
 import CallModal from "@/components/call/CallModal";
@@ -48,6 +49,7 @@ export default function ChatPage() {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [showGroupSettings, setShowGroupSettings] = useState(false);
 
   // Rooms state
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
@@ -190,6 +192,25 @@ export default function ChatPage() {
       }
       loadGroups();
     });
+
+    // Group settings updated
+    socket.on(
+      "group_settings_updated",
+      ({
+        groupId,
+        settings,
+      }: {
+        groupId: number;
+        settings: Group["settings"];
+      }) => {
+        setGroups((prev) =>
+          prev.map((g) => (g.id === groupId ? { ...g, settings } : g)),
+        );
+        if (selectedGroup && selectedGroup.id === groupId) {
+          setSelectedGroup((prev) => (prev ? { ...prev, settings } : prev));
+        }
+      },
+    );
 
     // Room events
     socket.on(
@@ -797,6 +818,23 @@ export default function ChatPage() {
     handleSelectGroup(group);
   };
 
+  const handleSaveGroupSettings = async (settings: Group["settings"]) => {
+    if (!selectedGroup || !settings) return;
+
+    try {
+      const data = await groupAPI.updateSettings(selectedGroup.id, settings);
+      setSelectedGroup(data.group);
+      setGroups((prev) =>
+        prev.map((g) => (g.id === selectedGroup.id ? data.group : g)),
+      );
+      setShowGroupSettings(false);
+      alert("Group settings updated successfully!");
+    } catch (error: any) {
+      console.error("Error updating group settings:", error);
+      alert(error.response?.data?.error || "Failed to update group settings");
+    }
+  };
+
   const handleLeaveGroup = () => {
     setSelectedGroup(null);
     setChatType("conversation");
@@ -974,7 +1012,7 @@ export default function ChatPage() {
     if (activeCall && (activeCall.groupMembers || selectedGroup)) {
       const members = activeCall.groupMembers || selectedGroup?.members || [];
       const memberIds = members.map((m) => m.id);
-      
+
       try {
         const { busyUserIds: busy } = await callAPI.checkBusy(memberIds);
         setBusyUserIds(busy);
@@ -983,7 +1021,7 @@ export default function ChatPage() {
         setBusyUserIds([]);
       }
     }
-    
+
     setShowInviteModal(true);
   };
 
@@ -1051,8 +1089,6 @@ export default function ChatPage() {
             )}
           </svg>
         </button>
-
-
 
         {sidebarCollapsed ? (
           <>
@@ -1177,7 +1213,7 @@ export default function ChatPage() {
               <div className={groupStyles.sectionLabel}>Groups</div>
               {groups.map((group) => {
                 const groupRoomsForThisGroup = groupRooms.filter(
-                  (room) => room.groupId === group.id
+                  (room) => room.groupId === group.id,
                 );
                 const isExpanded = expandedGroups.has(group.id);
                 const hasRooms = groupRoomsForThisGroup.length > 0;
@@ -1232,7 +1268,9 @@ export default function ChatPage() {
                             stroke="currentColor"
                             strokeWidth="2"
                             style={{
-                              transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                              transform: isExpanded
+                                ? "rotate(90deg)"
+                                : "rotate(0deg)",
                               transition: "transform 0.2s ease",
                             }}
                           >
@@ -1266,12 +1304,14 @@ export default function ChatPage() {
                                 {room.name}
                               </div>
                               <div className={groupStyles.roomItemMembers}>
-                                {room.memberCount || room.members?.length || 0} members
+                                {room.memberCount || room.members?.length || 0}{" "}
+                                members
                               </div>
                             </div>
                           </div>
                         ))}
-                        {group.myRole === "admin" && (
+                        {(group.myRole === "admin" ||
+                          group.settings?.whoCanCreateRooms === "everyone") && (
                           <button
                             className={groupStyles.createRoomButton}
                             onClick={(e) => {
@@ -1481,6 +1521,27 @@ export default function ChatPage() {
                   members
                 </div>
               </div>
+              {selectedGroup.myRole === "admin" && (
+                <button
+                  className={groupStyles.infoButton}
+                  onClick={() => setShowGroupSettings(true)}
+                  title="Group Settings"
+                  style={{ marginRight: "8px" }}
+                >
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M12 1v6m0 6v6m-9-9h6m6 0h6"></path>
+                    <path d="M4.22 4.22l4.24 4.24m7.08 0l4.24-4.24M4.22 19.78l4.24-4.24m7.08 0l4.24 4.24"></path>
+                  </svg>
+                </button>
+              )}
               <button
                 className={callStyles.callButton}
                 onClick={handleInitiateCall}
@@ -1535,12 +1596,44 @@ export default function ChatPage() {
               onSubmit={handleSendMessage}
               className={styles.messageInputContainer}
             >
+              {(selectedGroup.myRole === "admin" ||
+                selectedGroup.settings?.whoCanCreateRooms === "everyone") && (
+                <button
+                  type="button"
+                  className={groupStyles.createRoomIconButton}
+                  onClick={handleCreateRoom}
+                  title="Create Room"
+                >
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                    <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                    <line x1="12" y1="8" x2="12" y2="14"></line>
+                    <line x1="9" y1="11" x2="15" y2="11"></line>
+                  </svg>
+                </button>
+              )}
               <input
                 type="text"
                 value={messageInput}
                 onChange={(e) => handleTyping(e.target.value)}
-                placeholder="Type a message..."
+                placeholder={
+                  selectedGroup.myRole === "admin" ||
+                  selectedGroup.settings?.whoCanSendMessages === "everyone"
+                    ? "Type a message..."
+                    : "Only admins can send messages"
+                }
                 className={styles.messageInput}
+                disabled={
+                  selectedGroup.myRole !== "admin" &&
+                  selectedGroup.settings?.whoCanSendMessages === "admin"
+                }
               />
               <button
                 type="submit"
@@ -1752,6 +1845,15 @@ export default function ChatPage() {
         currentUserId={user.id}
       />
 
+      {/* Group Settings Modal */}
+      {showGroupSettings && selectedGroup && selectedGroup.settings && (
+        <GroupSettingsModal
+          settings={selectedGroup.settings}
+          onClose={() => setShowGroupSettings(false)}
+          onSave={handleSaveGroupSettings}
+        />
+      )}
+
       {/* Create Room Modal */}
       {showCreateRoomModal && selectedGroup && (
         <CreateRoomModal
@@ -1854,11 +1956,11 @@ export default function ChatPage() {
                           className={groupStyles.memberItem}
                           style={{
                             padding: "0.75rem 1rem",
-                            background: isInCall 
-                              ? "#e7f5ff" 
-                              : isBusy 
-                              ? "#fff3cd" 
-                              : "#f8f9fa",
+                            background: isInCall
+                              ? "#e7f5ff"
+                              : isBusy
+                                ? "#fff3cd"
+                                : "#f8f9fa",
                             borderRadius: "12px",
                             cursor: isDisabled ? "default" : "pointer",
                             display: "flex",
@@ -1868,8 +1970,8 @@ export default function ChatPage() {
                             border: isInCall
                               ? "1px solid #4dabf7"
                               : isBusy
-                              ? "1px solid #ffc107"
-                              : "1px solid #e9ecef",
+                                ? "1px solid #ffc107"
+                                : "1px solid #e9ecef",
                             opacity: isDisabled ? 0.8 : 1,
                           }}
                           onMouseEnter={(e) => {
@@ -1970,7 +2072,7 @@ export default function ChatPage() {
                                 viewBox="0 0 24 24"
                                 fill="currentColor"
                               >
-                                <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/>
+                                <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z" />
                               </svg>
                               Busy
                             </div>

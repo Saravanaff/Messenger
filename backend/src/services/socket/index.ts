@@ -173,7 +173,10 @@ export const initializeSocket = (server: HTTPServer): Server => {
         });
 
         // Send missed call messages to busy users for group/room calls
-        if ((data.type === "group" || data.type === "room") && busyUsers.length > 0) {
+        if (
+          (data.type === "group" || data.type === "room") &&
+          busyUsers.length > 0
+        ) {
           const { Message } = await import("../../models");
           for (const busyUserId of busyUsers) {
             try {
@@ -183,16 +186,24 @@ export const initializeSocket = (server: HTTPServer): Server => {
                 content: `Missed call from ${socket.data.user.username}`,
                 status: "sent",
               });
-              
+
               // Notify the busy user about the missed call
-              io.to(`user:${busyUserId}`).emit(data.type === "group" ? "new_group_message" : "new_room_message", {
-                [data.type === "group" ? "groupId" : "roomId"]: data.targetId,
-                senderId: userId,
-                content: `Missed call from ${socket.data.user.username}`,
-                sender: { username: socket.data.user.username },
-              });
+              io.to(`user:${busyUserId}`).emit(
+                data.type === "group"
+                  ? "new_group_message"
+                  : "new_room_message",
+                {
+                  [data.type === "group" ? "groupId" : "roomId"]: data.targetId,
+                  senderId: userId,
+                  content: `Missed call from ${socket.data.user.username}`,
+                  sender: { username: socket.data.user.username },
+                },
+              );
             } catch (error) {
-              console.error(`Error creating missed call message for user ${busyUserId}:`, error);
+              console.error(
+                `Error creating missed call message for user ${busyUserId}:`,
+                error,
+              );
             }
           }
         }
@@ -212,7 +223,10 @@ export const initializeSocket = (server: HTTPServer): Server => {
         });
 
         // For conversation calls, if no available participants, the call won't proceed
-        if (data.type === "conversation" && availableParticipants.length === 0) {
+        if (
+          data.type === "conversation" &&
+          availableParticipants.length === 0
+        ) {
           usersInCall.delete(userId);
           return;
         }
@@ -341,10 +355,10 @@ export const initializeSocket = (server: HTTPServer): Server => {
       "call:participant_left",
       (data: { roomName: string; participants: number[] }) => {
         console.log(`User ${userId} left call ${data.roomName}`);
-        
+
         // Remove user from active calls
         usersInCall.delete(userId);
-        
+
         // Notify remaining participants
         data.participants.forEach((participantId) => {
           if (participantId !== userId) {

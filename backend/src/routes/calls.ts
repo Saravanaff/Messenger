@@ -1,6 +1,10 @@
-import express from 'express';
-import { authMiddleware } from '../middleware/auth';
-import { initiateCall, joinCall, checkUsersBusy } from '../controllers/callController';
+import express from "express";
+import { authMiddleware } from "../middleware/auth";
+import {
+  initiateCall,
+  joinCall,
+  checkUsersBusy,
+} from "../controllers/callController";
 
 const router = express.Router();
 
@@ -8,12 +12,12 @@ const router = express.Router();
 router.use(authMiddleware);
 
 // Initiate a new call
-router.post('/initiate', initiateCall);
+router.post("/initiate", initiateCall);
 
 // Join an existing call
-router.post('/join/:roomName', joinCall);
+router.post("/join/:roomName", joinCall);
 
 // Check if users are busy (in other calls)
-router.post('/check-busy', checkUsersBusy);
+router.post("/check-busy", checkUsersBusy);
 
 export default router;
