@@ -33,6 +33,10 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
+app.get("/",(req,res)=>{
+  res.send("Hello World");
+})
+
 // Initialize services
 const initializeServices = async () => {
   try {
